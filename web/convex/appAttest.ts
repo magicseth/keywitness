@@ -415,7 +415,21 @@ export const verifyKeyAttestation = mutation({
       throw new Error(`Expected initial counter 0, got ${parsed.signCount}`);
     }
 
-    // 7. Extract the credential public key from the attested credential data
+    // 7. Verify credentialId matches the provided keyId
+    if (!parsed.credentialId) {
+      throw new Error("No credential ID in attestation authData");
+    }
+    const credentialIdHex = toHex(parsed.credentialId);
+    // Apple App Attest keyId is the SHA-256 hash of the credential public key,
+    // base64url-encoded. The credentialId in authData should match.
+    // Compare as hex for consistency.
+    const keyIdBytes = base64urlDecode(args.keyId);
+    const keyIdHex = toHex(keyIdBytes);
+    if (credentialIdHex !== keyIdHex) {
+      throw new Error(`Credential ID mismatch: authData contains ${credentialIdHex} but keyId is ${keyIdHex}`);
+    }
+
+    // 8. Extract the credential public key from the attested credential data
     if (!parsed.credentialPublicKey) {
       throw new Error("No credential public key in attestation");
     }

@@ -369,6 +369,14 @@ class VoiceRecordingViewController: UIViewController, ARSCNViewDelegate {
             return
         }
 
+        guard result.audioMeshCorrelation.score >= 0.20 else {
+            let scoreText = String(format: "%.0f%%", result.audioMeshCorrelation.score * 100)
+            statusLabel.text = "Liveness too low (\(scoreText)) — try again"
+            statusLabel.textColor = .systemOrange
+            NSLog("[VoiceAttest] Seal refused: liveness %.1f%% < 20%%", result.audioMeshCorrelation.score * 100)
+            return
+        }
+
         statusLabel.text = "Sealing..."
         statusLabel.textColor = .systemBlue
         recordButton.isEnabled = false

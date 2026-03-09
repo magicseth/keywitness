@@ -16,21 +16,28 @@ http.route({
   handler: httpAction(async (ctx, request) => {
     const body = await request.json();
 
-    // Check if the signer's Ed25519 key has a linked App Attest credential.
-    // This proves the key lives on a real Apple device — the credential was
-    // created during initial App Attest attestation and doesn't expire.
-    let deviceVerified = false;
-    const signerKeyForDevice = extractSignerPublicKey(body.attestation);
-    if (signerKeyForDevice) {
-      deviceVerified = await ctx.runQuery(internal.appAttest.hasDeviceCredential, {
-        publicKey: signerKeyForDevice,
+    // Verify the attestation signature FIRST, before trusting any metadata.
+    // This prevents a forged payload from claiming another signer's identity.
+    const verificationResult = await verifyAttestationServerSide(body.attestation);
+    if (!verificationResult.valid) {
+      return new Response(JSON.stringify({ error: "Attestation signature verification failed", details: verificationResult.error }), {
+        status: 400,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
       });
     }
 
-    // Look up username for the signer's public key
+    // Now that the signature is verified, extract signer metadata safely
+    let deviceVerified = false;
+    const signerKey = verificationResult.publicKey;
+    if (signerKey) {
+      deviceVerified = await ctx.runQuery(internal.appAttest.hasDeviceCredential, {
+        publicKey: signerKey,
+      });
+    }
+
+    // Look up username for the verified signer's public key
     let username: string | undefined;
     let usernameSeq: number | undefined;
-    const signerKey = extractSignerPublicKey(body.attestation);
     if (signerKey) {
       const usernameDoc = await ctx.runQuery(api.usernames.getByPublicKey, { publicKey: signerKey });
       if (usernameDoc) {
@@ -104,8 +111,8 @@ http.route({
   method: "POST",
   handler: httpAction(async (ctx, request) => {
     const body = await request.json();
-    if (!body.username || !body.publicKey || !body.email) {
-      return new Response(JSON.stringify({ error: "Missing username, publicKey, or email" }), {
+    if (!body.username || !body.publicKey || !body.email || !body.signature) {
+      return new Response(JSON.stringify({ error: "Missing username, publicKey, email, or signature" }), {
         status: 400,
         headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
       });
@@ -115,6 +122,7 @@ http.route({
         username: body.username,
         publicKey: body.publicKey,
         email: body.email,
+        signature: body.signature,
       });
       return new Response(JSON.stringify(result), {
         status: 201,

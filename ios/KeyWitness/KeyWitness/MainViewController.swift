@@ -712,6 +712,17 @@ class MainViewController: UIViewController {
     }
 
     private func doClaimUsername(publicKey: String, username: String, email: String) {
+        // Sign proof-of-possession for the username claim
+        let signature: String
+        do {
+            signature = try CryptoEngine.signUsernameClaim(username: username)
+        } catch {
+            NSLog("[KeyWitness] Failed to sign username claim: %@", error.localizedDescription)
+            registerKeyButton.setTitle("Signing failed", for: .normal)
+            registerKeyButton.tintColor = .systemRed
+            return
+        }
+
         let url = URL(string: "https://www.keywitness.io/api/usernames/claim")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -721,6 +732,7 @@ class MainViewController: UIViewController {
             "username": username,
             "publicKey": publicKey,
             "email": email,
+            "signature": signature,
         ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
 

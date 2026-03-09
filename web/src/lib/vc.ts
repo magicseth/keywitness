@@ -216,30 +216,23 @@ export async function verifyEddsaJcs2022(
 export async function verifyAppAttestProof(
   proof: AppleAppAttestProof,
 ): Promise<ProofVerificationResult> {
-  // If server already verified this, trust the server
-  if (proof.serverVerified) {
-    return {
-      proofType: "deviceAttestation",
-      valid: true,
-      details: {
-        keyId: proof.keyId,
-        created: proof.created,
-        verifiedBy: "server",
-      },
-    };
-  }
+  // Never trust the self-asserted serverVerified flag in the proof payload.
+  // It's set by the attestation creator and can be forged. Device attestation
+  // validity must be determined by server-side verification against stored
+  // App Attest credentials (appAttestCredentials table lookup).
 
-  // If assertion data is present, we can note it but full P-256
-  // verification on the client requires the stored credential public key
-  // from the server. Mark as present but unverified client-side.
+  // Assertion data is present but we cannot verify P-256 ECDSA client-side
+  // (requires the stored credential public key from the server).
+  // Do NOT mark as valid — assertionData alone is untrusted without
+  // cryptographic verification against stored App Attest credentials.
   if (proof.assertionData) {
     return {
       proofType: "deviceAttestation",
-      valid: true, // data present, server should have verified during upload
+      valid: false,
+      error: "Client cannot verify App Attest assertion (requires server-side P-256 verification)",
       details: {
         keyId: proof.keyId,
         created: proof.created,
-        verifiedBy: "server-at-upload",
         hasAssertionData: true,
       },
     };

@@ -61,10 +61,77 @@ class KeyWitnessKeyboard: KeyboardInputViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+
+        // Check full access every time the keyboard appears — user may have
+        // just toggled the setting in the middle of a session.
+        if !hasFullAccess {
+            showFullAccessRequired()
+            return
+        }
+        hideFullAccessRequired()
+
         installTouchOverlay()
         hasInsertedSignal = false
         keystrokeEvents.removeAll()
         composedText = ""
+    }
+
+    // MARK: - Full Access Gate
+
+    private var fullAccessOverlay: UIView?
+
+    private func showFullAccessRequired() {
+        guard fullAccessOverlay == nil, let inputView = self.inputView else { return }
+
+        let overlay = UIView()
+        overlay.backgroundColor = UIColor(white: 0.10, alpha: 1.0)
+        overlay.frame = inputView.bounds
+        overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+
+        let stack = UIStackView()
+        stack.axis = .vertical
+        stack.alignment = .center
+        stack.spacing = 6
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        let lockIcon = UIImageView(image: UIImage(systemName: "lock.shield"))
+        lockIcon.tintColor = .systemBlue
+        lockIcon.contentMode = .scaleAspectFit
+        lockIcon.translatesAutoresizingMaskIntoConstraints = false
+        lockIcon.heightAnchor.constraint(equalToConstant: 28).isActive = true
+        lockIcon.widthAnchor.constraint(equalToConstant: 28).isActive = true
+
+        let title = UILabel()
+        title.text = "Full Access Required"
+        title.font = .systemFont(ofSize: 15, weight: .semibold)
+        title.textColor = .white
+
+        let instructions = UILabel()
+        instructions.text = "Settings → General → Keyboard → Keyboards → KeyWitness → Allow Full Access"
+        instructions.font = .systemFont(ofSize: 12)
+        instructions.textColor = .systemGray
+        instructions.textAlignment = .center
+        instructions.numberOfLines = 0
+
+        stack.addArrangedSubview(lockIcon)
+        stack.addArrangedSubview(title)
+        stack.addArrangedSubview(instructions)
+        overlay.addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            stack.centerYAnchor.constraint(equalTo: overlay.centerYAnchor),
+            stack.leadingAnchor.constraint(equalTo: overlay.leadingAnchor, constant: 24),
+            stack.trailingAnchor.constraint(equalTo: overlay.trailingAnchor, constant: -24),
+        ])
+
+        inputView.addSubview(overlay)
+        inputView.bringSubviewToFront(overlay)
+        fullAccessOverlay = overlay
+    }
+
+    private func hideFullAccessRequired() {
+        fullAccessOverlay?.removeFromSuperview()
+        fullAccessOverlay = nil
     }
 
     // MARK: - Touch Capture
@@ -121,7 +188,9 @@ class KeyWitnessKeyboard: KeyboardInputViewController {
         )
         keystrokeEvents.append(keystroke)
 
-        // Maintain running cleartext
+        // Maintain running cleartext — note this is only accurate for linear
+        // (end-of-text) editing. Non-linear edits are handled at seal time
+        // by scrubbing keystroke keys against the final composed text.
         switch key {
         case "backspace":
             if !composedText.isEmpty { composedText.removeLast() }
@@ -138,6 +207,7 @@ class KeyWitnessKeyboard: KeyboardInputViewController {
 
     func attestTapped() {
         guard !isAttesting else { return }
+        guard hasFullAccess else { return }
 
         // Use composed text built from tracked keystrokes (including backspaces)
         // rather than textDocumentProxy, which doesn't reflect our keystroke history.
@@ -147,7 +217,7 @@ class KeyWitnessKeyboard: KeyboardInputViewController {
 
         isAttesting = true
 
-        let events = keystrokeEvents
+        let events = Self.scrubDeletedKeystrokes(keystrokeEvents, finalText: cleartext)
         Task {
             do {
                 let defaults = UserDefaults(suiteName: "group.io.keywitness")
@@ -204,6 +274,48 @@ class KeyWitnessKeyboard: KeyboardInputViewController {
                     self.composedText = ""
                     self.textDocumentProxy.insertText("\n[Attestation error: \(error.localizedDescription)]")
                 }
+            }
+        }
+    }
+
+    // MARK: - Keystroke Scrubbing
+
+    /// Redact key values from keystroke events that don't appear in the final text.
+    /// Backspaced/deleted characters are replaced with "█" so biometric timing data
+    /// is preserved (proving a human typed and edited) without leaking deleted content.
+    static func scrubDeletedKeystrokes(_ events: [KeystrokeEvent], finalText: String) -> [KeystrokeEvent] {
+        // Replay events forward to figure out which character events survive.
+        // Each non-backspace event pushes onto a stack; each backspace pops.
+        // Surviving events are those still on the stack at the end.
+        var stack: [(index: Int, char: String)] = []  // index into events array
+        for (i, event) in events.enumerated() {
+            if event.key == "backspace" {
+                if !stack.isEmpty { stack.removeLast() }
+            } else {
+                stack.append((index: i, char: event.key))
+            }
+        }
+
+        let survivingIndices = Set(stack.map { $0.index })
+
+        return events.enumerated().map { (i, event) in
+            if event.key == "backspace" {
+                // Keep backspace events as-is — they reveal editing occurred
+                return event
+            } else if survivingIndices.contains(i) {
+                // Character survived into final text — keep it
+                return event
+            } else {
+                // Character was deleted — redact the key but keep biometrics
+                return KeystrokeEvent(
+                    key: "█",
+                    touchDownTime: event.touchDownTime,
+                    touchUpTime: event.touchUpTime,
+                    x: event.x,
+                    y: event.y,
+                    force: event.force,
+                    majorRadius: event.majorRadius
+                )
             }
         }
     }

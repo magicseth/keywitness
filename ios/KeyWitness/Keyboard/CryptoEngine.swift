@@ -70,6 +70,16 @@ final class CryptoEngine {
         return (signature: signature, publicKey: pubKey)
     }
 
+    /// Signs a username claim message to prove ownership of the private key.
+    /// Message format: "keywitness:claim:<username>"
+    static func signUsernameClaim(username: String) throws -> String {
+        let message = "keywitness:claim:\(username.lowercased())"
+        guard let data = message.data(using: .utf8) else {
+            throw CryptoEngineError.encryptionFailed
+        }
+        return try signBase64URL(data)
+    }
+
     // MARK: - Hashing
 
     /// Computes the SHA-256 hash of the given data and returns it as raw bytes.

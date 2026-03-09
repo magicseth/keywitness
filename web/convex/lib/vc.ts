@@ -143,13 +143,18 @@ export async function verifyEddsaJcs2022(
 }
 
 export async function verifyAppAttestProof(proof: AppleAppAttestProof): Promise<ProofVerificationResult> {
-  if (proof.serverVerified) {
-    return { proofType: "deviceAttestation", valid: true, details: { keyId: proof.keyId, verifiedBy: "server" } };
-  }
+  // Never trust self-asserted serverVerified flag in the proof — it's set by the
+  // attestation creator and can be forged. Device attestation status must come
+  // from the server's own records (appAttestCredentials table lookup).
   if (proof.assertionData) {
-    return { proofType: "deviceAttestation", valid: true, details: { keyId: proof.keyId, verifiedBy: "server-at-upload" } };
+    return {
+      proofType: "deviceAttestation",
+      valid: false,
+      error: "App Attest assertion requires server-side P-256 verification against stored credentials",
+      details: { keyId: proof.keyId, hasAssertionData: true },
+    };
   }
-  return { proofType: "deviceAttestation", valid: false, error: "No assertion data and not server-verified" };
+  return { proofType: "deviceAttestation", valid: false, error: "No assertion data" };
 }
 
 const VC_CONTEXT = "https://www.w3.org/ns/credentials/v2";
