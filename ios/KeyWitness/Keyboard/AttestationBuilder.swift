@@ -66,7 +66,25 @@ final class AttestationBuilder {
 
     // MARK: - Public API
 
-    /// Creates a full attestation for the given cleartext and keystroke events.
+    /// Creates a v3 (W3C VC 2.0) attestation with eddsa-jcs-2022 proof.
+    /// This is the preferred method for new attestations.
+    static func createV3Attestation(cleartext: String,
+                                    keystrokeEvents: [KeystrokeEvent],
+                                    faceIdVerified: Bool,
+                                    appAttestKeyId: String? = nil,
+                                    appAttestAssertion: String? = nil,
+                                    appAttestClientData: String? = nil) throws -> (block: String, encryptionKey: String) {
+        return try VCBuilder.createVC(
+            cleartext: cleartext,
+            keystrokeEvents: keystrokeEvents,
+            faceIdVerified: faceIdVerified,
+            appAttestKeyId: appAttestKeyId,
+            appAttestAssertion: appAttestAssertion,
+            appAttestClientData: appAttestClientData
+        )
+    }
+
+    /// Creates a v2 attestation (legacy format).
     /// Returns a tuple of (block: PEM-style attestation text, encryptionKey: base64url AES key).
     static func createAttestation(cleartext: String,
                                   keystrokeEvents: [KeystrokeEvent],

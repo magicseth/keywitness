@@ -173,7 +173,7 @@ class KeyWitnessKeyboard: UIInputViewController {
         row.addArrangedSubview(space)
 
         // Attest button
-        let attest = makeKeyButton(title: "Attest", background: attestBackground)
+        let attest = makeKeyButton(title: "Seal", background: attestBackground)
         attest.titleLabel?.font = UIFont.systemFont(ofSize: 15, weight: .semibold)
         attest.addTarget(self, action: #selector(attestTapped), for: .touchUpInside)
         attest.widthAnchor.constraint(equalToConstant: 72).isActive = true
@@ -513,7 +513,7 @@ class KeyWitnessKeyboard: UIInputViewController {
     // MARK: - Attest Button Loading State
 
     private func setAttestButtonLoading(_ loading: Bool) {
-        attestButton?.setTitle(loading ? "..." : "Attest", for: .normal)
+        attestButton?.setTitle(loading ? "..." : "Seal", for: .normal)
         attestButton?.isEnabled = !loading
         attestButton?.alpha = loading ? 0.6 : 1.0
     }

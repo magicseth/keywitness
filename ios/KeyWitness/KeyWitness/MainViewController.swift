@@ -259,7 +259,7 @@ class MainViewController: UIViewController {
         contentStack.addArrangedSubview(titleLabel)
 
         // Subtitle
-        subtitleLabel.text = "Prove your words are yours."
+        subtitleLabel.text = "Proof you're human. Not AI."
         subtitleLabel.font = UIFont.systemFont(ofSize: 17, weight: .regular)
         subtitleLabel.textColor = UIColor.lightGray
         subtitleLabel.textAlignment = .center
@@ -289,7 +289,7 @@ class MainViewController: UIViewController {
         contentStack.addArrangedSubview(instructionsCard)
 
         let header = UILabel()
-        header.text = "Getting Started"
+        header.text = "How to Use"
         header.font = UIFont.systemFont(ofSize: 20, weight: .semibold)
         header.textColor = .white
 
@@ -298,12 +298,12 @@ class MainViewController: UIViewController {
         instructionsLabel.textColor = UIColor.lightGray
         instructionsLabel.text = """
         1. Go to Settings > General > Keyboard > Keyboards
-        2. Tap "Add New Keyboard..." and choose KeyWitness
-        3. Turn on "Allow Full Access" so it can upload
+        2. Tap "Add New Keyboard..." and pick KeyWitness
+        3. Turn on "Allow Full Access" (needed to save your proof)
         4. In any app, switch to the KeyWitness keyboard
-        5. Type something, then tap "Attest" to seal it
+        5. Type your message, then tap "Seal" to prove you wrote it
 
-        You'll get a notification to confirm with Face ID. Tap it within 30 seconds to prove it was really you.
+        A link will appear — anyone who opens it can see that a real person typed this message, not an AI.
         """
 
         let stack = UIStackView(arrangedSubviews: [header, instructionsLabel])
@@ -326,7 +326,7 @@ class MainViewController: UIViewController {
         card.translatesAutoresizingMaskIntoConstraints = false
         contentStack.addArrangedSubview(card)
 
-        publicKeyHeader.text = "Your Identity"
+        publicKeyHeader.text = "Your Name"
         publicKeyHeader.font = UIFont.systemFont(ofSize: 20, weight: .semibold)
         publicKeyHeader.textColor = .white
 
@@ -336,18 +336,18 @@ class MainViewController: UIViewController {
         publicKeyLabel.text = "Loading..."
         publicKeyLabel.textAlignment = .center
 
-        copyKeyButton.setTitle("Copy Identity Key", for: .normal)
+        copyKeyButton.setTitle("Copy ID", for: .normal)
         copyKeyButton.titleLabel?.font = UIFont.systemFont(ofSize: 15, weight: .medium)
         copyKeyButton.tintColor = accentColor
         copyKeyButton.addTarget(self, action: #selector(copyPublicKey), for: .touchUpInside)
 
-        registerKeyButton.setTitle("Register Key", for: .normal)
+        registerKeyButton.setTitle("Set Your Name", for: .normal)
         registerKeyButton.titleLabel?.font = UIFont.systemFont(ofSize: 15, weight: .medium)
         registerKeyButton.tintColor = accentColor
         registerKeyButton.addTarget(self, action: #selector(registerPublicKey), for: .touchUpInside)
 
         let description = UILabel()
-        description.text = "Register your name so people know this key belongs to you."
+        description.text = "Add your name so people know who wrote the message."
         description.font = UIFont.systemFont(ofSize: 13, weight: .regular)
         description.textColor = UIColor.lightGray
         description.textAlignment = .center
@@ -374,7 +374,7 @@ class MainViewController: UIViewController {
         card.translatesAutoresizingMaskIntoConstraints = false
         contentStack.addArrangedSubview(card)
 
-        testHeader.text = "Try It Out"
+        testHeader.text = "Try It"
         testHeader.font = UIFont.systemFont(ofSize: 20, weight: .semibold)
         testHeader.textColor = .white
 
@@ -438,7 +438,7 @@ class MainViewController: UIViewController {
             return
         }
 
-        let alert = UIAlertController(title: "Register Your Name", message: "Choose a name so people can see who wrote the attested text.", preferredStyle: .alert)
+        let alert = UIAlertController(title: "What's your name?", message: "This is how people will know it's you.", preferredStyle: .alert)
         alert.addTextField { textField in
             textField.placeholder = "Display name"
             textField.text = UIDevice.current.name

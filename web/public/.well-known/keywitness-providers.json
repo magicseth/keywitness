@@ -1,0 +1,50 @@
+{
+  "version": "1.0",
+  "providers": [
+    {
+      "id": "https://keywitness.io",
+      "name": "KeyWitness iOS Keyboard",
+      "type": "software-keyboard",
+      "platform": "iOS",
+      "capabilities": [
+        "keystroke-biometrics",
+        "face-id",
+        "app-attest",
+        "aes-gcm-encryption"
+      ],
+      "signingAlgorithm": "Ed25519",
+      "didMethod": "did:key",
+      "proofTypes": [
+        "keystrokeAttestation",
+        "biometricVerification",
+        "deviceAttestation"
+      ],
+      "supportedVersions": ["v1", "v2", "v3"],
+      "verificationEndpoint": "https://keywitness.io/v/{id}",
+      "contextUrl": "https://keywitness.io/ns/v1",
+      "contact": "https://keywitness.io"
+    },
+    {
+      "id": "https://typeproof.tech",
+      "name": "TypeProof Hardware Keyboard",
+      "type": "hardware-keyboard",
+      "platform": "cross-platform",
+      "capabilities": [
+        "keystroke-biometrics",
+        "fingerprint",
+        "secure-element",
+        "capacitive-touch"
+      ],
+      "signingAlgorithm": "Ed25519",
+      "didMethod": "did:key",
+      "proofTypes": [
+        "keystrokeAttestation",
+        "fingerprintVerification",
+        "hardwareAttestation"
+      ],
+      "supportedVersions": ["v3"],
+      "contextUrl": "https://typeproof.tech/ns/v1",
+      "contact": "https://typeproof.tech"
+    }
+  ]
+}

@@ -20,6 +20,13 @@
 		A1B2C3D4E5F60090000A0001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60091000A0001 /* Assets.xcassets */; };
 		A1B2C3D4E5F60092000A0001 /* AppAttestManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60093000A0001 /* AppAttestManager.swift */; };
 		A1B2C3D4E5F60094000A0001 /* AppAttestHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60095000A0001 /* AppAttestHelper.swift */; };
+		A1B2C3D4E5F60096000A0001 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60097000A0001 /* LaunchScreen.storyboard */; };
+		A1B2C3D4E5F600A0000A0001 /* DIDKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F600A1000A0001 /* DIDKey.swift */; };
+		A1B2C3D4E5F600A2000A0001 /* JCS.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F600A3000A0001 /* JCS.swift */; };
+		A1B2C3D4E5F600A4000A0001 /* VCBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F600A5000A0001 /* VCBuilder.swift */; };
+		A1B2C3D4E5F600A6000A0001 /* DIDKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F600A1000A0001 /* DIDKey.swift */; };
+		A1B2C3D4E5F600A7000A0001 /* JCS.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F600A3000A0001 /* JCS.swift */; };
+		A1B2C3D4E5F600A8000A0001 /* VCBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F600A5000A0001 /* VCBuilder.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -62,6 +69,10 @@
 		A1B2C3D4E5F60091000A0001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A1B2C3D4E5F60093000A0001 /* AppAttestManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAttestManager.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60095000A0001 /* AppAttestHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAttestHelper.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60097000A0001 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
+		A1B2C3D4E5F600A1000A0001 /* DIDKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DIDKey.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F600A3000A0001 /* JCS.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JCS.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F600A5000A0001 /* VCBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VCBuilder.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -100,6 +111,7 @@
 				A1B2C3D4E5F60002000A0001 /* AppDelegate.swift */,
 				A1B2C3D4E5F60004000A0001 /* MainViewController.swift */,
 				A1B2C3D4E5F60093000A0001 /* AppAttestManager.swift */,
+				A1B2C3D4E5F60097000A0001 /* LaunchScreen.storyboard */,
 				A1B2C3D4E5F60091000A0001 /* Assets.xcassets */,
 				A1B2C3D4E5F60016000A0001 /* Info.plist */,
 				A1B2C3D4E5F60080000A0001 /* KeyWitness.entitlements */,
@@ -114,6 +126,9 @@
 				A1B2C3D4E5F60008000A0001 /* CryptoEngine.swift */,
 				A1B2C3D4E5F6000A000A0001 /* AttestationBuilder.swift */,
 				A1B2C3D4E5F60095000A0001 /* AppAttestHelper.swift */,
+				A1B2C3D4E5F600A1000A0001 /* DIDKey.swift */,
+				A1B2C3D4E5F600A3000A0001 /* JCS.swift */,
+				A1B2C3D4E5F600A5000A0001 /* VCBuilder.swift */,
 				A1B2C3D4E5F60015000A0001 /* Info.plist */,
 				A1B2C3D4E5F60081000A0001 /* KeyWitnessKeyboard.entitlements */,
 			);
@@ -219,6 +234,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A1B2C3D4E5F60090000A0001 /* Assets.xcassets in Resources */,
+				A1B2C3D4E5F60096000A0001 /* LaunchScreen.storyboard in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -241,6 +257,9 @@
 				A1B2C3D4E5F60070000A0001 /* CryptoEngine.swift in Sources */,
 				A1B2C3D4E5F60071000A0001 /* AttestationBuilder.swift in Sources */,
 				A1B2C3D4E5F60092000A0001 /* AppAttestManager.swift in Sources */,
+				A1B2C3D4E5F600A6000A0001 /* DIDKey.swift in Sources */,
+				A1B2C3D4E5F600A7000A0001 /* JCS.swift in Sources */,
+				A1B2C3D4E5F600A8000A0001 /* VCBuilder.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -252,6 +271,9 @@
 				A1B2C3D4E5F60007000A0001 /* CryptoEngine.swift in Sources */,
 				A1B2C3D4E5F60009000A0001 /* AttestationBuilder.swift in Sources */,
 				A1B2C3D4E5F60094000A0001 /* AppAttestHelper.swift in Sources */,
+				A1B2C3D4E5F600A0000A0001 /* DIDKey.swift in Sources */,
+				A1B2C3D4E5F600A2000A0001 /* JCS.swift in Sources */,
+				A1B2C3D4E5F600A4000A0001 /* VCBuilder.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -399,7 +421,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = KeyWitness/Info.plist;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -427,7 +449,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = KeyWitness/Info.plist;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (

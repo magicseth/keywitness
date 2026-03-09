@@ -1,0 +1,23 @@
+{
+  "@context": {
+    "KeyWitnessAttestation": "https://keywitness.io/ns/v1#KeyWitnessAttestation",
+    "HumanTypedContent": "https://keywitness.io/ns/v1#HumanTypedContent",
+    "cleartextHash": "https://keywitness.io/ns/v1#cleartextHash",
+    "encryptedCleartext": "https://keywitness.io/ns/v1#encryptedCleartext",
+    "deviceId": "https://keywitness.io/ns/v1#deviceId",
+    "keystrokeBiometricsHash": "https://keywitness.io/ns/v1#keystrokeBiometricsHash",
+    "faceIdVerified": "https://keywitness.io/ns/v1#faceIdVerified",
+    "AppleAppAttestProof": "https://keywitness.io/ns/v1#AppleAppAttestProof",
+    "keystrokeAttestation": "https://keywitness.io/ns/v1#keystrokeAttestation",
+    "biometricVerification": "https://keywitness.io/ns/v1#biometricVerification",
+    "deviceAttestation": "https://keywitness.io/ns/v1#deviceAttestation",
+    "proofType": "https://keywitness.io/ns/v1#proofType",
+    "keyId": "https://keywitness.io/ns/v1#keyId",
+    "assertionData": "https://keywitness.io/ns/v1#assertionData",
+    "clientData": "https://keywitness.io/ns/v1#clientData",
+    "serverVerified": "https://keywitness.io/ns/v1#serverVerified",
+    "capacitiveTouchProfile": "https://keywitness.io/ns/v1#capacitiveTouchProfile",
+    "secureElementSerial": "https://keywitness.io/ns/v1#secureElementSerial",
+    "firmwareVersion": "https://keywitness.io/ns/v1#firmwareVersion"
+  }
+}

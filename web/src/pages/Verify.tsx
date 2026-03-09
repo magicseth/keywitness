@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
-import { verifyAttestation, VerificationResult, KeystrokeTiming } from "../lib/verify";
+import { verifyAttestation, VerificationResult, KeystrokeTiming, ProofVerificationResult } from "../lib/verify";
 
 // ── Known keys localStorage helpers ─────────────────────────────────────────
 
@@ -56,6 +56,27 @@ function formatTimestamp(iso: string): string {
   }
 }
 
+function proofTypeLabel(proofType: string): string {
+  switch (proofType) {
+    case "keystrokeAttestation": return "Keystroke Attestation";
+    case "biometricVerification": return "Face ID Verification";
+    case "deviceAttestation": return "Device Attestation";
+    case "fingerprintVerification": return "Fingerprint Verification";
+    case "hardwareAttestation": return "Hardware Attestation";
+    default: return proofType;
+  }
+}
+
+function proofTypeIcon(proofType: string, valid: boolean): string {
+  if (!valid) return "x";
+  switch (proofType) {
+    case "keystrokeAttestation": return "K";
+    case "biometricVerification": return "F";
+    case "deviceAttestation": return "D";
+    default: return "P";
+  }
+}
+
 export default function Verify({ shortId }: { shortId?: string }) {
   const [input, setInput] = useState("");
   const [result, setResult] = useState<VerificationResult | null>(null);
@@ -64,12 +85,10 @@ export default function Verify({ shortId }: { shortId?: string }) {
   const [knownKeyName, setKnownKeyName] = useState<string | undefined>(undefined);
   const [savingKeyName, setSavingKeyName] = useState(false);
   const [keyNameInput, setKeyNameInput] = useState("");
-  const [, setKnownKeyVersion] = useState(0); // force re-render on known key changes
+  const [, setKnownKeyVersion] = useState(0);
 
-  // Read encryption key from URL fragment
   const encryptionKey = window.location.hash.slice(1) || undefined;
 
-  // Also check for ?a= query param
   const params = new URLSearchParams(window.location.search);
   const queryId = params.get("a") || shortId;
 
@@ -78,7 +97,6 @@ export default function Verify({ shortId }: { shortId?: string }) {
     queryId ? { shortId: queryId } : "skip",
   );
 
-  // Look up the public key in the registry after verification
   const keyRecord = useQuery(
     api.keys.getByPublicKey,
     result?.publicKey ? { publicKey: result.publicKey } : "skip",
@@ -102,7 +120,6 @@ export default function Verify({ shortId }: { shortId?: string }) {
     [encryptionKey],
   );
 
-  // Auto-load attestation from Convex when fetched
   useEffect(() => {
     if (attestationDoc?.attestation) {
       setInput(attestationDoc.attestation);
@@ -130,7 +147,7 @@ export default function Verify({ shortId }: { shortId?: string }) {
             KeyWitness
           </h1>
           <p className="text-gray-400 text-lg">
-            Verify that a message is authentic and hasn't been changed.
+            Was this written by a real person? Check here.
           </p>
         </div>
 
@@ -195,18 +212,23 @@ export default function Verify({ shortId }: { shortId?: string }) {
                 }`}
               >
                 {status === "verified"
-                  ? "AUTHENTIC"
+                  ? "HUMAN"
                   : status === "invalid"
-                    ? "TAMPERED"
+                    ? "SUSPICIOUS"
                     : "ERROR"}
               </span>
               <span className="text-gray-500 text-xs">
                 {status === "verified"
-                  ? "This message is exactly what was typed. Nothing has been changed."
+                  ? "A real person typed this on a real device. It hasn't been changed."
                   : status === "invalid"
-                    ? "Something doesn't match. This message may have been altered."
+                    ? "Something doesn't add up. This message may have been altered or faked."
                     : ""}
               </span>
+              {result.version && (
+                <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-gray-800 text-gray-500 font-mono">
+                  {result.version}
+                </span>
+              )}
             </div>
 
             {/* Error message */}
@@ -339,6 +361,11 @@ export default function Verify({ shortId }: { shortId?: string }) {
                   )}
                 </div>
 
+                {/* Proof Chain (v3 only) */}
+                {result.proofs && result.proofs.length > 0 && (
+                  <ProofChain proofs={result.proofs} />
+                )}
+
                 {/* When */}
                 <Field
                   label="When"
@@ -348,6 +375,18 @@ export default function Verify({ shortId }: { shortId?: string }) {
                       : undefined
                   }
                 />
+
+                {/* Identity */}
+                {result.issuerDID && (
+                  <div className="px-5 py-3 bg-[#111111]">
+                    <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">
+                      Issuer DID
+                    </div>
+                    <div className="text-gray-400 text-xs font-mono break-all">
+                      {result.issuerDID}
+                    </div>
+                  </div>
+                )}
 
                 {/* Signing Key */}
                 {result.publicKeyFingerprint && (
@@ -479,6 +518,22 @@ export default function Verify({ shortId }: { shortId?: string }) {
             </div>
             <div>
               <h3 className="text-gray-300 font-medium mb-1">
+                Standards
+              </h3>
+              <p>
+                KeyWitness v3 attestations use{" "}
+                <a href="https://www.w3.org/TR/vc-data-model-2.0/" className="text-blue-400 hover:underline" target="_blank" rel="noopener">
+                  W3C Verifiable Credentials 2.0
+                </a>{" "}
+                with the{" "}
+                <a href="https://www.w3.org/TR/vc-di-eddsa/" className="text-blue-400 hover:underline" target="_blank" rel="noopener">
+                  eddsa-jcs-2022
+                </a>{" "}
+                Data Integrity cryptosuite. Any VC-compatible verifier can validate them.
+              </p>
+            </div>
+            <div>
+              <h3 className="text-gray-300 font-medium mb-1">
                 It does not prove:
               </h3>
               <ul className="list-disc list-inside space-y-1 ml-1">
@@ -502,6 +557,59 @@ export default function Verify({ shortId }: { shortId?: string }) {
             </a>
           </div>
         </footer>
+      </div>
+    </div>
+  );
+}
+
+// ── Proof Chain component (v3 multi-proof) ──────────────────────────────────
+
+function ProofChain({ proofs }: { proofs: ProofVerificationResult[] }) {
+  return (
+    <div className="px-5 py-3 bg-[#111111]">
+      <div className="text-xs text-gray-500 uppercase tracking-wider mb-2">
+        Proof Chain
+      </div>
+      <div className="space-y-2">
+        {proofs.map((proof, i) => (
+          <div key={i} className="flex items-center gap-3">
+            <div
+              className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
+                proof.valid
+                  ? "bg-green-900/50 text-green-400 border border-green-800"
+                  : "bg-red-900/50 text-red-400 border border-red-800"
+              }`}
+            >
+              {proofTypeIcon(proof.proofType, proof.valid)}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span className={`text-sm font-medium ${proof.valid ? "text-green-400" : "text-red-400"}`}>
+                  {proofTypeLabel(proof.proofType)}
+                </span>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                  proof.valid
+                    ? "bg-green-900/50 text-green-400"
+                    : "bg-red-900/50 text-red-400"
+                }`}>
+                  {proof.valid ? "VALID" : "FAILED"}
+                </span>
+              </div>
+              {proof.error && (
+                <div className="text-xs text-red-400 mt-0.5">{proof.error}</div>
+              )}
+              {proof.details && (
+                <div className="text-xs text-gray-600 mt-0.5">
+                  {proof.details.created && <span>{formatTimestamp(proof.details.created as string)}</span>}
+                  {proof.details.verifiedBy && <span> (verified by {proof.details.verifiedBy as string})</span>}
+                </div>
+              )}
+            </div>
+            {i < proofs.length - 1 && (
+              <div className="w-px h-4 bg-gray-700 ml-3" />
+            )}
+          </div>
+        ))}
       </div>
     </div>
   );

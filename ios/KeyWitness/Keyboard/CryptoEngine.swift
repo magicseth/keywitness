@@ -30,6 +30,18 @@ final class CryptoEngine {
         return base64URLEncode(key.publicKey.rawRepresentation)
     }
 
+    /// Returns the public key as a did:key identifier.
+    static func publicKeyDIDKey() throws -> String {
+        let key = try getOrCreateSigningKey()
+        return DIDKey.ed25519ToDIDKey(key.publicKey.rawRepresentation)
+    }
+
+    /// Returns the verification method ID (did:key:z...#z...) for VC proofs.
+    static func verificationMethodId() throws -> String {
+        let did = try publicKeyDIDKey()
+        return DIDKey.verificationMethodId(for: did)
+    }
+
     // MARK: - Signing
 
     /// Signs the given data with the device signing key and returns the signature bytes.
