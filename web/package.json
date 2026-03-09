@@ -14,7 +14,7 @@
     "preview": "vite preview",
     "deploy:backend": "npx convex deploy --yes",
     "deploy:static": "node node_modules/@convex-dev/self-hosting/dist/cli/index.js upload --prod --component selfHosting",
-    "deploy": "npm run build && npm run deploy:backend && npm run deploy:static"
+    "deploy": "npm run deploy:backend && VITE_CONVEX_URL=https://quick-curlew-492.convex.cloud npm run build && npm run deploy:static"
   },
   "dependencies": {
     "@convex-dev/self-hosting": "github:get-convex/static-hosting",
