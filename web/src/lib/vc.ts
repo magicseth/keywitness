@@ -275,9 +275,9 @@ export async function verifyVC(credential: KeyWitnessVC): Promise<VCVerification
       results.push(await verifyAppAttestProof(proof));
     } else {
       results.push({
-        proofType: (proof as Record<string, string>).proofType || "unknown",
+        proofType: (proof as unknown as Record<string, string>).proofType || "unknown",
         valid: false,
-        error: `Unknown proof type: ${(proof as Record<string, string>).type}`,
+        error: `Unknown proof type: ${(proof as unknown as Record<string, string>).type}`,
       });
     }
   }

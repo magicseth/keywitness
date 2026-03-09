@@ -170,5 +170,5 @@ if (document.readyState === "loading") {
   KeyWitness.autoRender();
 }
 
-(window as Record<string, unknown>).KeyWitness = KeyWitness;
+(window as unknown as Record<string, unknown>).KeyWitness = KeyWitness;
 export default KeyWitness;

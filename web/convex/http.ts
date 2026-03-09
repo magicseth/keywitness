@@ -836,7 +836,7 @@ http.route({
 http.route({
   path: "/embed/badge",
   method: "GET",
-  handler: httpAction(async (ctx, request) => {
+  handler: httpAction(async (_ctx, request) => {
     const url = new URL(request.url);
     const shortId = url.searchParams.get("id") || "";
     const style = url.searchParams.get("style") || "inline";

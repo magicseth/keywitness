@@ -639,8 +639,8 @@ function ProofChain({ proofs }: { proofs: ProofVerificationResult[] }) {
               )}
               {proof.details && (
                 <div className="text-xs text-gray-600 mt-0.5">
-                  {proof.details.created && <span>{formatTimestamp(proof.details.created as string)}</span>}
-                  {proof.details.verifiedBy && <span> (verified by {proof.details.verifiedBy as string})</span>}
+                  {proof.details.created ? <span>{formatTimestamp(String(proof.details.created))}</span> : null}
+                  {proof.details.verifiedBy ? <span> (verified by {String(proof.details.verifiedBy)})</span> : null}
                 </div>
               )}
             </div>
