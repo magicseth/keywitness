@@ -46,22 +46,42 @@ final class VCBuilder {
         let issuerDID = DIDKey.ed25519ToDIDKey(publicKeyData)
         let verificationMethod = DIDKey.verificationMethodId(for: issuerDID)
 
+        // Get app version
+        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+
+        // Build credential subject
+        var credentialSubject: [String: Any] = [
+            "type": "HumanTypedContent",
+            "cleartextHash": cleartextHash,
+            "encryptedCleartext": encryptedCleartext,
+            "deviceId": deviceId,
+            "keystrokeBiometricsHash": biometricsHash,
+            "faceIdVerified": faceIdVerified,
+            "appVersion": appVersion,
+        ]
+
         // Build the credential (without proof)
-        let credential: [String: Any] = [
+        var credential: [String: Any] = [
             "@context": [vcContext, kwContext],
             "type": ["VerifiableCredential", "KeyWitnessAttestation"],
             "issuer": issuerDID,
             "validFrom": timestamp,
-            "credentialSubject": [
-                "type": "HumanTypedContent",
-                "cleartextHash": cleartextHash,
-                "encryptedCleartext": encryptedCleartext,
-                "deviceId": deviceId,
-                "keystrokeBiometricsHash": biometricsHash,
-                "faceIdVerified": faceIdVerified,
-            ] as [String: Any],
+            "credentialSubject": credentialSubject,
             "publicKey": publicKeyB64,  // backward compat
         ]
+
+        // Add credentialStatus if a status index is available
+        // The server assigns the statusIndex during upload and the iOS app
+        // can include it in subsequent attestations after receiving it.
+        if let statusIndex = UserDefaults.standard.object(forKey: "keywitness.lastStatusIndex") as? Int {
+            credential["credentialStatus"] = [
+                "id": "https://keywitness.io/credentials/status?id=1#\(statusIndex)",
+                "type": "BitstringStatusListEntry",
+                "statusPurpose": "revocation",
+                "statusListIndex": String(statusIndex),
+                "statusListCredential": "https://keywitness.io/credentials/status?id=1",
+            ] as [String: Any]
+        }
 
         // Sign with eddsa-jcs-2022
         let keystrokeProof = try signEddsaJcs2022(

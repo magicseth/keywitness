@@ -52,6 +52,17 @@ export interface KeyWitnessCredentialSubject {
   deviceId: string;
   keystrokeBiometricsHash: string;
   faceIdVerified?: boolean;
+  /** App version that created this attestation */
+  appVersion?: string;
+}
+
+/** W3C BitstringStatusListEntry for credential revocation */
+export interface CredentialStatus {
+  id: string;
+  type: "BitstringStatusListEntry";
+  statusPurpose: "revocation" | "suspension";
+  statusListIndex: string;
+  statusListCredential: string;
 }
 
 export interface KeyWitnessVC {
@@ -60,6 +71,7 @@ export interface KeyWitnessVC {
   issuer: string; // did:key
   validFrom: string; // ISO 8601
   credentialSubject: KeyWitnessCredentialSubject;
+  credentialStatus?: CredentialStatus;
   proof: VCProof | VCProof[];
   /** Legacy compat: raw base64url public key */
   publicKey?: string;

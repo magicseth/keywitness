@@ -1,6 +1,7 @@
 import UIKit
 import LocalAuthentication
 import UserNotifications
+import ActivityKit
 
 /// Container app main screen. Shows setup instructions, the device public key,
 /// and a test text field to try the KeyWitness keyboard.
@@ -103,18 +104,52 @@ class MainViewController: UIViewController {
             // Expired — clean up
             defaults?.removeObject(forKey: "pendingBiometricShortId")
             defaults?.removeObject(forKey: "pendingBiometricCreatedAt")
+            defaults?.removeObject(forKey: "pendingBiometricCleartext")
             return
         }
+
+        let cleartext = defaults?.string(forKey: "pendingBiometricCleartext")
 
         // Consume immediately so we don't re-trigger
         defaults?.removeObject(forKey: "pendingBiometricShortId")
         defaults?.removeObject(forKey: "pendingBiometricCreatedAt")
+        defaults?.removeObject(forKey: "pendingBiometricCleartext")
 
-        // Trigger Face ID
-        performBiometricVerification(shortId: shortId)
+        // Show confirmation before Face ID
+        showBiometricConfirmation(shortId: shortId, cleartext: cleartext)
     }
 
-    // MARK: - Biometric Verification Flow
+    // MARK: - Biometric Confirmation + Verification Flow
+
+    /// Shows an alert with the message text so the user can review what they're confirming before Face ID.
+    private func showBiometricConfirmation(shortId: String, cleartext: String?) {
+        let preview: String
+        if let text = cleartext, !text.isEmpty {
+            // Show up to 200 characters with ellipsis
+            if text.count > 200 {
+                preview = "\"\(text.prefix(200))...\""
+            } else {
+                preview = "\"\(text)\""
+            }
+        } else {
+            preview = "(message text unavailable)"
+        }
+
+        let alert = UIAlertController(
+            title: "Confirm it's you",
+            message: "You're proving that you — not an AI — wrote this message:\n\n\(preview)",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { [weak self] _ in
+            self?.updateBiometricStatus("Cancelled", color: .systemRed)
+            self?.clearBiometricStatusAfterDelay()
+            self?.endLiveActivity(shortId: shortId, status: "expired")
+        })
+        alert.addAction(UIAlertAction(title: "Confirm with Face ID", style: .default) { [weak self] _ in
+            self?.performBiometricVerification(shortId: shortId)
+        })
+        present(alert, animated: true)
+    }
 
     private func performBiometricVerification(shortId: String) {
         let context = LAContext()
@@ -167,7 +202,8 @@ class MainViewController: UIViewController {
                 DispatchQueue.main.async {
                     if let httpResponse = response as? HTTPURLResponse,
                        httpResponse.statusCode == 200, error == nil {
-                        self?.updateBiometricStatus("✓ Biometric verified for \(shortId)", color: .systemGreen)
+                        self?.updateBiometricStatus("✓ Confirmed! Your proof is sealed.", color: .systemGreen)
+                        self?.endLiveActivity(shortId: shortId, status: "verified")
                     } else {
                         var msg = "Upload failed"
                         if let data = data,
@@ -195,6 +231,23 @@ class MainViewController: UIViewController {
     private func clearBiometricStatusAfterDelay() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
             self?.biometricStatusLabel.isHidden = true
+        }
+    }
+
+    /// End any active Live Activity for the given shortId.
+    private func endLiveActivity(shortId: String, status: String) {
+        if #available(iOS 16.2, *) {
+            let finalState = KeyWitnessVerificationAttributes.ContentState(status: status)
+            for activity in Activity<KeyWitnessVerificationAttributes>.activities {
+                if activity.attributes.shortId == shortId {
+                    Task {
+                        await activity.end(
+                            .init(state: finalState, staleDate: nil),
+                            dismissalPolicy: .after(.now + 2)
+                        )
+                    }
+                }
+            }
         }
     }
 
@@ -530,13 +583,19 @@ extension MainViewController: UNUserNotificationCenterDelegate {
         completionHandler([.banner, .sound])
     }
 
-    /// Handle notification tap — triggers Face ID flow
+    /// Handle notification tap — shows confirmation then triggers Face ID flow
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
         let userInfo = response.notification.request.content.userInfo
         if let shortId = userInfo["shortId"] as? String {
-            performBiometricVerification(shortId: shortId)
+            let defaults = UserDefaults(suiteName: "group.io.keywitness")
+            let cleartext = defaults?.string(forKey: "pendingBiometricCleartext")
+            // Clean up so checkPendingBiometric doesn't also fire
+            defaults?.removeObject(forKey: "pendingBiometricShortId")
+            defaults?.removeObject(forKey: "pendingBiometricCreatedAt")
+            defaults?.removeObject(forKey: "pendingBiometricCleartext")
+            showBiometricConfirmation(shortId: shortId, cleartext: cleartext)
         }
         completionHandler()
     }

@@ -18,6 +18,7 @@
     "serverVerified": "https://keywitness.io/ns/v1#serverVerified",
     "capacitiveTouchProfile": "https://keywitness.io/ns/v1#capacitiveTouchProfile",
     "secureElementSerial": "https://keywitness.io/ns/v1#secureElementSerial",
-    "firmwareVersion": "https://keywitness.io/ns/v1#firmwareVersion"
+    "firmwareVersion": "https://keywitness.io/ns/v1#firmwareVersion",
+    "appVersion": "https://keywitness.io/ns/v1#appVersion"
   }
 }

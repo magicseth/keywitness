@@ -578,6 +578,13 @@ Phase 5.1: Nostr NIP-05 ──────────────┤  ✅ /.wel
 Phase 5.2: Bluesky labeler ────────────┤  ✅ /api/labeler/verify
 Phase 5.3: C2PA assertions ────────────┤  ✅ /api/c2pa?id=
 Phase 5.4: EAT tokens ────────────────┘  ✅ /api/eat?id=
+                                       │
+                                       ▼
+Phase 6.1: BitstringStatusList ────────┤  ✅ /credentials/status, trust.ts
+Phase 6.2: Trust registry ────────────┤  ✅ /api/trust/* endpoints
+Phase 6.3: Verifier trust warnings ───┤  ✅ Verify.tsx trust banner
+Phase 6.4: iOS version pinning ───────┤  ✅ upload response + VCBuilder
+Phase 6.5: credentialStatus in VCs ───┘  ✅ VCBuilder.swift + vc.ts types
 ```
 
 ### Estimated Scope
@@ -595,6 +602,11 @@ Phase 5.4: EAT tokens ────────────────┘  ✅ /
 | 5.2 | None | None | http.ts (labeler route) | None | **✅ Done** |
 | 5.3 | None | None | http.ts (C2PA route) | None | **✅ Done** |
 | 5.4 | None | None | http.ts (EAT route) | None | **✅ Done** |
+| 6.1 | None | None | trust.ts, attestations.ts, http.ts, schema.ts | None | **✅ Done** |
+| 6.2 | None | None | trust.ts, http.ts, schema.ts | None | **✅ Done** |
+| 6.3 | None | Verify.tsx (trust banner), verify.ts (TrustStatus type) | None | None | **✅ Done** |
+| 6.4 | VCBuilder.swift (appVersion, credentialStatus) | None | http.ts (upload response) | None | **✅ Done** |
+| 6.5 | VCBuilder.swift (credentialStatus) | vc.ts (types) | None | None | **✅ Done** |
 
 ---
 
@@ -606,6 +618,96 @@ Phase 5.4: EAT tokens ────────────────┘  ✅ /
 4. **URLs stay the same** — `keywitness.io/v/{id}#key` works for all versions
 5. **New features are additive** — multi-proof, provider metadata, ecosystem integrations don't break existing attestations
 6. **The server stores the raw PEM block** — no server-side migration needed. Old attestations are already in the database and continue to work
+
+---
+
+## Phase 6: Trust, Revocation & Version Pinning
+
+**Effort:** Medium | **Impact:** High | **Breaking:** No (additive)
+
+### 6.1 BitstringStatusList (W3C Recommendation)
+
+Credential-level revocation using [W3C BitstringStatusList v1.0](https://www.w3.org/TR/vc-bitstring-status-list/).
+Each attestation receives a `statusIndex` during upload. The status list is a 131,072-bit bitstring
+(16KB, the W3C minimum) served as a `BitstringStatusListCredential` at `/credentials/status?id=1`.
+
+**Credential format:**
+```json
+{
+  "credentialStatus": {
+    "id": "https://keywitness.io/credentials/status?id=1#42",
+    "type": "BitstringStatusListEntry",
+    "statusPurpose": "revocation",
+    "statusListIndex": "42",
+    "statusListCredential": "https://keywitness.io/credentials/status?id=1"
+  }
+}
+```
+
+**Implementation:**
+- `convex/trust.ts` — `createStatusList`, `allocateStatusIndex`, `setStatusBit`, `checkStatusBit`, `revokeAttestation`
+- `convex/attestations.ts` — allocates `statusIndex` during upload
+- `convex/http.ts` — `GET /credentials/status?id=` serves W3C-format `BitstringStatusListCredential`
+- `convex/schema.ts` — `statusLists` table (listId, statusPurpose, encodedList, nextIndex)
+
+### 6.2 Server-Side Trust Registry
+
+A trust management layer for keys, app versions, and providers, exposed via REST API.
+
+**App version trust / forced upgrade (Signal pattern):**
+- `setAppVersionTrust(version, trusted)` — explicitly mark versions as trusted/revoked
+- `setMinimumAppVersion(version)` — forced upgrade: iOS app checks on upload, server returns `minimumVersion` in upload response
+- `isAppVersionTrusted(version)` — permissive by default (trusted unless explicitly revoked)
+
+**Provider trust:**
+- `addProvider(providerId, name, proofTypes, signingAlgorithms, ...)` — register trusted attestation providers
+- `revokeProvider(providerId, reason)` — revoke trust (with audit trail in `revocations` table)
+- `getProviders()` — list active providers (non-expired, non-revoked)
+
+**Key revocation:**
+- `revokeKey(type, identifier, reason)` — revoke an Ed25519 key or App Attest credential
+- `unrevokeKey(identifier)` — escape hatch for accidental revocations
+- `isRevoked(identifier)` — check revocation status
+
+**Composite query:**
+- `getTrustStatus(publicKey?, appAttestKeyId?, appVersion?, providerId?)` — single query returning key revocation, credential revocation, version trust, provider trust, and minimum version
+
+**API endpoints:**
+- `GET /api/trust/status?publicKey=&appVersion=` — composite trust check
+- `GET /api/trust/minimum-version` — forced upgrade check
+- `GET /api/trust/revocations?type=` — list revocations
+- `GET /api/trust/providers` — DB-backed provider list
+
+### 6.3 Verifier Trust Warnings
+
+The web verification page (`Verify.tsx`) fetches trust status from `/api/trust/status` after
+cryptographic verification succeeds. Trust warnings are displayed as an orange banner between
+the status banner and the detail fields, covering:
+- Signing key revoked
+- Device credential revoked
+- App version no longer trusted
+
+### 6.4 iOS Version Pinning
+
+The upload response includes `minimumVersion` and `warnings`. The iOS app:
+- Reads `minimumVersion` from the upload response
+- Compares against `CFBundleShortVersionString`
+- If below minimum, prompts user to update via App Store
+
+The v3 credential includes `appVersion` in `credentialSubject` so verifiers can display the app version that produced the attestation.
+
+### 6.5 credentialStatus in v3 VCs
+
+The iOS `VCBuilder.swift` includes a `credentialStatus` field (BitstringStatusListEntry) in the VC
+when a status index is available. The status index is received from the server during upload and
+cached in `UserDefaults` for subsequent attestations.
+
+**Schema additions:**
+- `appVersions` — version trust records (version, bundleId, trusted, revokedAt, revocationReason)
+- `appConfig` — global config (key-value, e.g. minimumAppVersion)
+- `providerTrust` — dynamic provider registry (providerId, name, type, platform, proofTypes, ...)
+- `revocations` — key/credential/provider revocations (type, identifier, reason, revokedAt, revokedBy)
+- `statusLists` — BitstringStatusList storage (listId, statusPurpose, encodedList, nextIndex)
 
 ---
 

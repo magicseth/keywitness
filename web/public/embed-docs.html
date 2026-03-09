@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KeyWitness Embed SDK - Integration Guide</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 800px; margin: 0 auto; padding: 40px 20px; color: #e5e7eb; background: #0a0a0a; line-height: 1.6; }
+  h1 { color: #fff; margin-bottom: 8px; }
+  h2 { color: #fff; margin-top: 40px; border-bottom: 1px solid #374151; padding-bottom: 8px; }
+  h3 { color: #d1d5db; margin-top: 24px; }
+  p { color: #9ca3af; }
+  code { background: #1f2937; padding: 2px 6px; border-radius: 4px; font-size: 14px; color: #22c55e; }
+  pre { background: #111; border: 1px solid #374151; border-radius: 8px; padding: 16px; overflow-x: auto; font-size: 13px; line-height: 1.5; color: #e5e7eb; }
+  pre code { background: none; padding: 0; color: inherit; }
+  .badge-demo { padding: 20px; border: 1px solid #374151; border-radius: 8px; margin: 16px 0; background: #111; }
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #374151; font-size: 14px; }
+  th { color: #9ca3af; font-weight: 600; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .pill-get { background: rgba(59,130,246,0.15); color: #3b82f6; }
+  .pill-post { background: rgba(34,197,94,0.15); color: #22c55e; }
+</style>
+</head>
+<body>
+
+<h1>KeyWitness Embed SDK</h1>
+<p>Add cryptographic verification badges to any website in seconds.</p>
+
+<h2>Quick Start</h2>
+
+<h3>Option 1: HTML attributes (zero code)</h3>
+<pre><code>&lt;!-- Load the SDK --&gt;
+&lt;script src="https://keywitness.io/embed.js"&gt;&lt;/script&gt;
+
+&lt;!-- Add a badge anywhere --&gt;
+&lt;span data-keywitness="abc123" data-keywitness-style="inline"&gt;&lt;/span&gt;</code></pre>
+
+<p>The SDK auto-discovers all <code>data-keywitness</code> elements on page load.</p>
+
+<h3>Option 2: JavaScript API</h3>
+<pre><code>&lt;script src="https://keywitness.io/embed.js"&gt;&lt;/script&gt;
+&lt;script&gt;
+  // Render a badge
+  const badge = KeyWitness.badge('#my-element', 'abc123', {
+    style: 'card',    // 'inline' | 'card' | 'floating'
+    theme: 'dark',    // 'light' | 'dark' | 'auto'
+    onVerified(result) {
+      console.log('Verification result:', result);
+    }
+  });
+
+  // Later: update or destroy
+  badge.update('newShortId');
+  badge.destroy();
+&lt;/script&gt;</code></pre>
+
+<h3>Option 3: Server-side verification</h3>
+<pre><code>// Verify by attestation ID
+const resp = await fetch('https://keywitness.io/api/verify?id=abc123');
+const result = await resp.json();
+// { valid: true, version: "v3", deviceId: "...", timestamp: "...", ... }
+
+// Verify raw attestation block
+const resp = await fetch('https://keywitness.io/api/verify', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    attestation: '-----BEGIN KEYWITNESS ATTESTATION-----\n...\n-----END KEYWITNESS ATTESTATION-----'
+  })
+});
+const result = await resp.json();</code></pre>
+
+<h2>Badge Styles</h2>
+
+<table>
+<tr><th>Style</th><th>Size</th><th>Use Case</th></tr>
+<tr><td><code>inline</code></td><td>200 x 28px</td><td>Next to content, in bylines, comment headers</td></tr>
+<tr><td><code>card</code></td><td>320 x 180px</td><td>Standalone verification cards, sidebars</td></tr>
+<tr><td><code>floating</code></td><td>48 x 48px</td><td>Fixed-position badge overlaying content</td></tr>
+</table>
+
+<h3>data-keywitness attributes</h3>
+<table>
+<tr><th>Attribute</th><th>Required</th><th>Values</th></tr>
+<tr><td><code>data-keywitness</code></td><td>Yes</td><td>The attestation short ID</td></tr>
+<tr><td><code>data-keywitness-style</code></td><td>No</td><td><code>inline</code> (default), <code>card</code>, <code>floating</code></td></tr>
+<tr><td><code>data-keywitness-theme</code></td><td>No</td><td><code>auto</code> (default), <code>light</code>, <code>dark</code></td></tr>
+</table>
+
+<h2>REST API</h2>
+
+<h3><span class="pill pill-get">GET</span> /api/verify?id={shortId}</h3>
+<p>Verify an attestation by its short ID. Returns structured verification result.</p>
+<pre><code>{
+  "shortId": "abc123",
+  "url": "https://keywitness.io/v/abc123",
+  "valid": true,
+  "version": "v3",
+  "deviceId": "4BF95BEA-...",
+  "timestamp": "2026-03-09T04:07:41.132Z",
+  "issuerDID": "did:key:z6Mk...",
+  "publicKeyFingerprint": "a1:b2:c3:...",
+  "appAttestPresent": true,
+  "deviceVerified": true,
+  "biometricVerified": false,
+  "proofs": [
+    { "proofType": "keystrokeAttestation", "valid": true },
+    { "proofType": "deviceAttestation", "valid": true }
+  ]
+}</code></pre>
+
+<h3><span class="pill pill-post">POST</span> /api/verify</h3>
+<p>Verify a raw attestation PEM block. Full server-side cryptographic verification.</p>
+<pre><code>// Request
+{ "attestation": "-----BEGIN KEYWITNESS ATTESTATION-----\n...\n-----END KEYWITNESS ATTESTATION-----" }
+
+// Response: same structure as GET (minus shortId/url/deviceVerified/biometricVerified)</code></pre>
+
+<h3><span class="pill pill-get">GET</span> /api/oembed?url={url}</h3>
+<p>oEmbed endpoint for rich embeds in Slack, Discord, CMS tools, etc. Returns a <code>rich</code> oEmbed response with an iframe.</p>
+
+<h2>oEmbed & OpenGraph</h2>
+<p>KeyWitness verification URLs (<code>keywitness.io/v/{id}</code>) include:</p>
+<ul style="color: #9ca3af;">
+  <li>OpenGraph meta tags for rich previews in social media, Slack, Discord</li>
+  <li>oEmbed discovery for platforms that support it</li>
+  <li>Twitter Card meta tags</li>
+</ul>
+<p>Share a verification URL and it automatically shows a rich preview with verification status.</p>
+
+<h2>Content Security Policy</h2>
+<p>If your site uses CSP headers, add:</p>
+<pre><code>frame-src https://keywitness.io;
+script-src https://keywitness.io;</code></pre>
+
+<h2>Events</h2>
+<p>The badge iframe communicates with the parent page via <code>postMessage</code>:</p>
+<pre><code>window.addEventListener('message', (event) => {
+  if (event.origin !== 'https://keywitness.io') return;
+
+  if (event.data.type === 'keywitness:verified') {
+    console.log(event.data.shortId, event.data.result);
+  }
+});</code></pre>
+
+</body>
+</html>

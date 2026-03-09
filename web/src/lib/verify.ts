@@ -29,6 +29,18 @@ export interface KeystrokeTiming {
   radius?: number;
 }
 
+export interface TrustStatus {
+  keyRevoked: boolean;
+  keyRevocationReason?: string;
+  credentialRevoked: boolean;
+  credentialRevocationReason?: string;
+  appVersionTrusted?: boolean;
+  appVersionRevocationReason?: string;
+  providerTrusted?: boolean;
+  providerRevocationReason?: string;
+  minimumVersion?: string;
+}
+
 export interface VerificationResult {
   valid: boolean;
   version?: "v1" | "v2" | "v3";
@@ -42,11 +54,14 @@ export interface VerificationResult {
   keystrokeBiometricsHash?: string;
   keystrokeTimings?: KeystrokeTiming[];
   appAttestPresent?: boolean;
+  appVersion?: string;
   error?: string;
   encrypted?: boolean;
   decryptionFailed?: boolean;
   // v3 multi-proof results
   proofs?: ProofVerificationResult[];
+  // Trust status (fetched separately after verification)
+  trustStatus?: TrustStatus;
 }
 
 // ── Base64url helpers ────────────────────────────────────────────────────────
@@ -279,6 +294,7 @@ async function verifyV3(
     keystrokeBiometricsHash: vc.credentialSubject.keystrokeBiometricsHash,
     keystrokeTimings,
     appAttestPresent: hasDeviceProof,
+    appVersion: vc.credentialSubject.appVersion,
     encrypted: !!vc.credentialSubject.encryptedCleartext,
     decryptionFailed: decryptionFailed ? true : undefined,
     proofs: vcResult.proofs,

@@ -12,7 +12,11 @@ import type * as appAttest from "../appAttest.js";
 import type * as attestations from "../attestations.js";
 import type * as http from "../http.js";
 import type * as keys from "../keys.js";
+import type * as lib_didkey from "../lib/didkey.js";
+import type * as lib_vc from "../lib/vc.js";
+import type * as lib_verify from "../lib/verify.js";
 import type * as selfHosting from "../selfHosting.js";
+import type * as trust from "../trust.js";
 
 import type {
   ApiFromModules,
@@ -25,7 +29,11 @@ declare const fullApi: ApiFromModules<{
   attestations: typeof attestations;
   http: typeof http;
   keys: typeof keys;
+  "lib/didkey": typeof lib_didkey;
+  "lib/vc": typeof lib_vc;
+  "lib/verify": typeof lib_verify;
   selfHosting: typeof selfHosting;
+  trust: typeof trust;
 }>;
 
 /**

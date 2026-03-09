@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#0a0a0a"/>
+  <!-- Subtle grid -->
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1a1a1a" stroke-width="0.5"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="630" fill="url(#grid)"/>
+  <!-- Green glow -->
+  <circle cx="200" cy="315" r="150" fill="#22c55e" opacity="0.06"/>
+  <!-- Logo mark -->
+  <text x="120" y="340" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="120" font-weight="800" fill="#22c55e" opacity="0.9">K</text>
+  <!-- Title -->
+  <text x="320" y="260" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="64" font-weight="700" fill="#ffffff">KeyWitness</text>
+  <!-- Subtitle -->
+  <text x="320" y="320" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="28" fill="#9ca3af">Prove your words are yours.</text>
+  <!-- Verified badge -->
+  <g transform="translate(320, 360)">
+    <rect width="280" height="36" rx="18" fill="#22c55e" opacity="0.15"/>
+    <circle cx="18" cy="18" r="6" fill="#22c55e"/>
+    <text x="34" y="24" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="16" font-weight="600" fill="#22c55e">VERIFIED HUMAN-TYPED CONTENT</text>
+  </g>
+  <!-- Standards -->
+  <text x="320" y="440" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="16" fill="#6b7280">W3C Verifiable Credentials 2.0 · Ed25519 · eddsa-jcs-2022</text>
+  <!-- URL -->
+  <text x="320" y="540" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" fill="#4b5563">keywitness.io</text>
+</svg>

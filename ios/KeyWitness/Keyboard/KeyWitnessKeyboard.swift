@@ -1,5 +1,6 @@
 import UIKit
 import UserNotifications
+import ActivityKit
 
 /// KeyWitnessKeyboard is the main UIInputViewController for the KeyWitness
 /// custom keyboard extension. It renders a QWERTY layout with touch biometric
@@ -396,8 +397,8 @@ class KeyWitnessKeyboard: UIInputViewController {
                                 .replacingOccurrences(of: "https://", with: "")
                             self.textDocumentProxy.insertText(shortURL)
 
-                            self.storePendingBiometric(shortId: shortId)
-                            self.fireBiometricNotification(shortId: shortId)
+                            self.storePendingBiometric(shortId: shortId, cleartext: cleartext)
+                            self.fireBiometricNotification(shortId: shortId, cleartext: cleartext)
 
                         case .failure:
                             self.textDocumentProxy.insertText("\n\n" + attestationBlock)
@@ -417,26 +418,58 @@ class KeyWitnessKeyboard: UIInputViewController {
     // MARK: - Biometric Notification
 
     /// Store the shortId in App Group so the container app can pick it up for Face ID verification.
-    private func storePendingBiometric(shortId: String) {
+    private func storePendingBiometric(shortId: String, cleartext: String) {
         let defaults = UserDefaults(suiteName: "group.io.keywitness")
         defaults?.set(shortId, forKey: "pendingBiometricShortId")
         defaults?.set(Date(), forKey: "pendingBiometricCreatedAt")
+        defaults?.set(cleartext, forKey: "pendingBiometricCleartext")
     }
 
-    /// Fire a local notification giving the user 30 seconds to verify with Face ID.
-    private func fireBiometricNotification(shortId: String) {
+    /// Start a Live Activity (or fall back to a regular notification) for biometric confirmation.
+    private func fireBiometricNotification(shortId: String, cleartext: String) {
+        let messagePreview: String
+        if cleartext.count > 100 {
+            messagePreview = String(cleartext.prefix(100)) + "..."
+        } else {
+            messagePreview = cleartext
+        }
+
+        // Try to start a Live Activity
+        if #available(iOSApplicationExtension 16.2, *),
+           ActivityAuthorizationInfo().areActivitiesEnabled {
+            let attributes = KeyWitnessVerificationAttributes(
+                shortId: shortId,
+                messagePreview: messagePreview,
+                expiresAt: Date().addingTimeInterval(30)
+            )
+            let state = KeyWitnessVerificationAttributes.ContentState(status: "waiting")
+            do {
+                _ = try Activity.request(
+                    attributes: attributes,
+                    content: .init(state: state, staleDate: Date().addingTimeInterval(30)),
+                    pushType: nil
+                )
+                // Also fire a regular notification as a fallback tap target
+            } catch {
+                // Fall through to regular notification
+            }
+        }
+
+        // Always fire a regular notification too (appears immediately, supports tap-to-open)
         let content = UNMutableNotificationContent()
-        content.title = "KeyWitness"
-        content.body = "Tap to confirm it was you. You have 30 seconds."
+        content.title = "Confirm it's you"
+        content.body = "You wrote: \"\(messagePreview)\"\n\nTap to verify with Face ID."
         content.sound = .default
         content.userInfo = ["shortId": shortId]
+        if #available(iOSApplicationExtension 15.0, *) {
+            content.interruptionLevel = .timeSensitive
+        }
 
         let request = UNNotificationRequest(
             identifier: "keywitness-biometric-\(shortId)",
             content: content,
-            trigger: nil  // deliver immediately
+            trigger: nil
         )
-
         UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
     }
 

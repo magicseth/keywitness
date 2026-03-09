@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
-import { verifyAttestation, VerificationResult, KeystrokeTiming, ProofVerificationResult } from "../lib/verify";
+import { verifyAttestation, VerificationResult, KeystrokeTiming, ProofVerificationResult, TrustStatus } from "../lib/verify";
 
 // ── Known keys localStorage helpers ─────────────────────────────────────────
 
@@ -86,6 +86,7 @@ export default function Verify({ shortId }: { shortId?: string }) {
   const [savingKeyName, setSavingKeyName] = useState(false);
   const [keyNameInput, setKeyNameInput] = useState("");
   const [, setKnownKeyVersion] = useState(0);
+  const [trustStatus, setTrustStatus] = useState<TrustStatus | null>(null);
 
   const encryptionKey = window.location.hash.slice(1) || undefined;
 
@@ -106,12 +107,29 @@ export default function Verify({ shortId }: { shortId?: string }) {
     async (text: string, manualText?: string) => {
       if (!text.trim()) return;
       setVerifying(true);
+      setTrustStatus(null);
       try {
         const res = await verifyAttestation(text, encryptionKey, manualText);
         setResult(res);
         if (res.publicKey) {
           const known = getKnownKey(res.publicKey);
           setKnownKeyName(known?.name);
+        }
+        // Fetch trust status in the background
+        if (res.publicKey || res.appVersion) {
+          const params = new URLSearchParams();
+          if (res.publicKey) params.set("publicKey", res.publicKey);
+          if (res.appVersion) params.set("appVersion", res.appVersion);
+          try {
+            const trustResp = await fetch(`/api/trust/status?${params.toString()}`);
+            if (trustResp.ok) {
+              const trust = await trustResp.json();
+              setTrustStatus(trust);
+              res.trustStatus = trust;
+            }
+          } catch {
+            // Trust check is best-effort; don't block verification
+          }
         }
       } finally {
         setVerifying(false);
@@ -230,6 +248,27 @@ export default function Verify({ shortId }: { shortId?: string }) {
                 </span>
               )}
             </div>
+
+            {/* Trust warnings */}
+            {trustStatus && (trustStatus.keyRevoked || trustStatus.credentialRevoked || trustStatus.appVersionTrusted === false) && (
+              <div className="px-5 py-3 bg-orange-950/50 border-b border-orange-900/50">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="inline-block w-2 h-2 rounded-full bg-orange-400" />
+                  <span className="text-orange-400 text-xs font-semibold uppercase tracking-wide">Trust Warning</span>
+                </div>
+                <div className="space-y-1 text-sm text-orange-300">
+                  {trustStatus.keyRevoked && (
+                    <p>Signing key has been revoked{trustStatus.keyRevocationReason ? `: ${trustStatus.keyRevocationReason}` : "."}</p>
+                  )}
+                  {trustStatus.credentialRevoked && (
+                    <p>Device credential has been revoked{trustStatus.credentialRevocationReason ? `: ${trustStatus.credentialRevocationReason}` : "."}</p>
+                  )}
+                  {trustStatus.appVersionTrusted === false && (
+                    <p>App version is no longer trusted{trustStatus.appVersionRevocationReason ? `: ${trustStatus.appVersionRevocationReason}` : "."}</p>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Error message */}
             {result.error && (
