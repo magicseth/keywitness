@@ -44,17 +44,33 @@ http.route({
         } else if (linkedKey && signerKey) {
           console.error("App Attest signer mismatch: attestation signed by", signerKey?.slice(0, 12), "but credential linked to", linkedKey?.slice(0, 12));
         } else {
-          // Could not extract signer — still mark as verified since App Attest passed
-          deviceVerified = true;
+          console.error("App Attest passed but signer extraction failed — refusing to mark deviceVerified");
         }
       } catch (e) {
         console.error("App Attest verification failed:", e instanceof Error ? e.message : e);
       }
     }
 
+    // Look up username for the signer's public key
+    let username: string | undefined;
+    let usernameSeq: number | undefined;
+    const signerKey = extractSignerPublicKey(body.attestation);
+    if (signerKey) {
+      const usernameDoc = await ctx.runQuery(api.usernames.getByPublicKey, { publicKey: signerKey });
+      if (usernameDoc) {
+        username = usernameDoc.username;
+        const seqResult = await ctx.runMutation(api.usernames.allocateSeq, { username });
+        if (seqResult) {
+          usernameSeq = seqResult.seq;
+        }
+      }
+    }
+
     const result = await ctx.runMutation(api.attestations.upload, {
       attestation: body.attestation,
       deviceVerified: deviceVerified || undefined,
+      username,
+      usernameSeq,
     });
 
     // Include minimum version in response for forced upgrade
@@ -67,10 +83,15 @@ http.route({
       if (!versionTrust.trusted) warnings.push("app_version_revoked");
     }
 
+    // Build URL — use typed.by vanity URL if username is available
     const origin = new URL(request.url).origin;
+    const url = username && usernameSeq
+      ? `https://typed.by/${username}/${usernameSeq}`
+      : `${origin}/v/${result.id}`;
+
     return new Response(JSON.stringify({
       id: result.id,
-      url: `${origin}/v/${result.id}`,
+      url,
       statusIndex: result.statusIndex,
       minimumVersion: minVersion.minimumVersion,
       warnings: warnings.length > 0 ? warnings : undefined,
@@ -95,6 +116,84 @@ http.route({
         "Access-Control-Allow-Methods": "POST, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type",
       },
+    });
+  }),
+});
+
+// ── Username API ─────────────────────────────────────────────────────────────
+
+// POST /api/usernames/claim - claim a username
+http.route({
+  path: "/api/usernames/claim",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const body = await request.json();
+    if (!body.username || !body.publicKey || !body.email) {
+      return new Response(JSON.stringify({ error: "Missing username, publicKey, or email" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      });
+    }
+    try {
+      const result = await ctx.runMutation(api.usernames.claim, {
+        username: body.username,
+        publicKey: body.publicKey,
+        email: body.email,
+      });
+      return new Response(JSON.stringify(result), {
+        status: 201,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      });
+    } catch (e) {
+      return new Response(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }), {
+        status: 409,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      });
+    }
+  }),
+});
+
+http.route({
+  path: "/api/usernames/claim",
+  method: "OPTIONS",
+  handler: httpAction(async () => {
+    return new Response(null, {
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+      },
+    });
+  }),
+});
+
+// GET /api/resolve/:username/:seq - resolve vanity URL to shortId
+http.route({
+  path: "/api/resolve",
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    const url = new URL(request.url);
+    const username = url.searchParams.get("username");
+    const seq = url.searchParams.get("seq");
+    if (!username || !seq) {
+      return new Response(JSON.stringify({ error: "Missing username or seq" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      });
+    }
+    const result = await ctx.runQuery(api.usernames.resolve, {
+      username,
+      seq: parseInt(seq, 10),
+    });
+    if (!result) {
+      return new Response(JSON.stringify({ error: "Not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      });
+    }
+    return new Response(JSON.stringify(result), {
+      status: 200,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
     });
   }),
 });
@@ -146,6 +245,22 @@ http.route({
   handler: httpAction(async (ctx, request) => {
     const body = await request.json();
     try {
+      // Identity binding: verify the biometric signer matches the attestation's signer
+      const doc = await ctx.runQuery(api.attestations.getByShortId, { shortId: body.shortId });
+      if (!doc) {
+        return new Response(JSON.stringify({ error: "Attestation not found" }), {
+          status: 404,
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+        });
+      }
+      const attestationSigner = extractSignerPublicKey(doc.attestation);
+      if (attestationSigner && body.publicKey && attestationSigner !== body.publicKey) {
+        return new Response(JSON.stringify({ error: "Biometric key does not match attestation signer" }), {
+          status: 403,
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+        });
+      }
+
       const result = await ctx.runMutation(api.attestations.addBiometricVerification, {
         shortId: body.shortId,
         signature: body.signature,

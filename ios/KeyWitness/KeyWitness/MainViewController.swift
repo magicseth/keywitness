@@ -20,6 +20,7 @@ class MainViewController: UIViewController {
     private let publicKeyLabel = UILabel()
     private let copyKeyButton = UIButton(type: .system)
     private let registerKeyButton = UIButton(type: .system)
+    private let usernameStatusLabel = UILabel()
     private let testHeader = UILabel()
     private let testTextView = UITextView()
     private let biometricStatusLabel = UILabel()
@@ -124,7 +125,11 @@ class MainViewController: UIViewController {
         defaults?.removeObject(forKey: "pendingBiometricCreatedAt")
         defaults?.removeObject(forKey: "pendingBiometricCleartext")
 
-        startLiveActivity(shortId: shortId, cleartext: cleartext)
+        // Delay slightly — the app may not be fully foregrounded yet
+        // (Activity.request requires foreground state)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.startLiveActivity(shortId: shortId, cleartext: cleartext)
+        }
         showBiometricConfirmation(shortId: shortId, cleartext: cleartext)
     }
 
@@ -516,7 +521,7 @@ class MainViewController: UIViewController {
         card.translatesAutoresizingMaskIntoConstraints = false
         contentStack.addArrangedSubview(card)
 
-        publicKeyHeader.text = "Your Name"
+        publicKeyHeader.text = "Your Identity"
         publicKeyHeader.font = UIFont.systemFont(ofSize: 20, weight: .semibold)
         publicKeyHeader.textColor = .white
 
@@ -531,19 +536,26 @@ class MainViewController: UIViewController {
         copyKeyButton.tintColor = accentColor
         copyKeyButton.addTarget(self, action: #selector(copyPublicKey), for: .touchUpInside)
 
-        registerKeyButton.setTitle("Set Your Name", for: .normal)
+        // Show claimed username or claim button
+        usernameStatusLabel.font = UIFont.systemFont(ofSize: 15, weight: .medium)
+        usernameStatusLabel.textColor = .systemGreen
+        usernameStatusLabel.textAlignment = .center
+        usernameStatusLabel.numberOfLines = 0
+        usernameStatusLabel.isHidden = true
+
+        registerKeyButton.setTitle("Claim Username", for: .normal)
         registerKeyButton.titleLabel?.font = UIFont.systemFont(ofSize: 15, weight: .medium)
         registerKeyButton.tintColor = accentColor
-        registerKeyButton.addTarget(self, action: #selector(registerPublicKey), for: .touchUpInside)
+        registerKeyButton.addTarget(self, action: #selector(claimUsername), for: .touchUpInside)
 
         let description = UILabel()
-        description.text = "Add your name so people know who wrote the message."
+        description.text = "Claim a username to get short links like typed.by/you/1"
         description.font = UIFont.systemFont(ofSize: 13, weight: .regular)
         description.textColor = UIColor.lightGray
         description.textAlignment = .center
         description.numberOfLines = 0
 
-        let stack = UIStackView(arrangedSubviews: [publicKeyHeader, publicKeyLabel, copyKeyButton, registerKeyButton, description])
+        let stack = UIStackView(arrangedSubviews: [publicKeyHeader, usernameStatusLabel, publicKeyLabel, copyKeyButton, registerKeyButton, description])
         stack.axis = .vertical
         stack.spacing = 12
         stack.alignment = .center
@@ -555,6 +567,9 @@ class MainViewController: UIViewController {
             stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
             stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -16)
         ])
+
+        // Check if username already claimed
+        loadUsername()
     }
 
     private func setupTestField() {
@@ -623,65 +638,125 @@ class MainViewController: UIViewController {
         }
     }
 
-    @objc private func registerPublicKey() {
+    // MARK: - Username
+
+    private func loadUsername() {
+        let defaults = UserDefaults(suiteName: "group.io.keywitness")
+        if let username = defaults?.string(forKey: "claimedUsername") {
+            usernameStatusLabel.text = "typed.by/\(username)"
+            usernameStatusLabel.isHidden = false
+            registerKeyButton.setTitle("Change Username", for: .normal)
+        }
+    }
+
+    @objc private func claimUsername() {
         guard let key = publicKeyLabel.text, !key.starts(with: "Error"), !key.starts(with: "Loading") else {
             return
         }
 
-        let alert = UIAlertController(title: "What's your name?", message: "This is how people will know it's you.", preferredStyle: .alert)
+        let defaults = UserDefaults(suiteName: "group.io.keywitness")
+        let currentUsername = defaults?.string(forKey: "claimedUsername")
+
+        let alert = UIAlertController(
+            title: "Claim Username",
+            message: "Pick a username for your typed.by links.\nAn email is required for account recovery only.",
+            preferredStyle: .alert
+        )
         alert.addTextField { textField in
-            textField.placeholder = "Display name"
-            textField.text = UIDevice.current.name
-            textField.autocapitalizationType = .words
+            textField.placeholder = "Username (e.g. magicseth)"
+            textField.text = currentUsername
+            textField.autocapitalizationType = .none
+            textField.autocorrectionType = .no
+        }
+        alert.addTextField { textField in
+            textField.placeholder = "Recovery email"
+            textField.keyboardType = .emailAddress
+            textField.autocapitalizationType = .none
         }
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Register", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: "Claim", style: .default) { [weak self] _ in
             guard let self = self else { return }
-            let displayName = alert.textFields?.first?.text?.trimmingCharacters(in: .whitespaces) ?? UIDevice.current.name
-            self.doRegister(publicKey: key, name: displayName.isEmpty ? UIDevice.current.name : displayName)
+            let username = alert.textFields?[0].text?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
+            let email = alert.textFields?[1].text?.trimmingCharacters(in: .whitespaces) ?? ""
+            guard !username.isEmpty, !email.isEmpty else {
+                self.registerKeyButton.setTitle("Username & email required", for: .normal)
+                self.registerKeyButton.tintColor = .systemRed
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    self.registerKeyButton.setTitle("Claim Username", for: .normal)
+                    self.registerKeyButton.tintColor = self.accentColor
+                }
+                return
+            }
+            self.doClaimUsername(publicKey: key, username: username, email: email)
         })
         present(alert, animated: true)
     }
 
-    private func doRegister(publicKey: String, name: String) {
-        let signature: String
-        do {
-            let result = try CryptoEngine.signRegistrationChallenge(name: name)
-            signature = result.signature
-        } catch {
-            registerKeyButton.setTitle("Sign failed", for: .normal)
-            registerKeyButton.tintColor = .systemRed
-            return
-        }
+    private func doClaimUsername(publicKey: String, username: String, email: String) {
+        let url = URL(string: "https://www.keywitness.io/api/usernames/claim")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let payload: [String: String] = [
+            "username": username,
+            "publicKey": publicKey,
+            "email": email,
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+
+        registerKeyButton.isEnabled = false
+        registerKeyButton.setTitle("Claiming...", for: .normal)
+
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.registerKeyButton.isEnabled = true
+
+                if let httpResponse = response as? HTTPURLResponse,
+                   httpResponse.statusCode == 201,
+                   error == nil {
+                    // Save username to shared defaults so keyboard can use it
+                    let defaults = UserDefaults(suiteName: "group.io.keywitness")
+                    defaults?.set(username, forKey: "claimedUsername")
+
+                    // Also register the display name for backwards compat
+                    self.doRegisterName(publicKey: publicKey, name: username)
+
+                    self.usernameStatusLabel.text = "typed.by/\(username)"
+                    self.usernameStatusLabel.isHidden = false
+                    self.registerKeyButton.setTitle("Change Username", for: .normal)
+                    self.registerKeyButton.tintColor = self.accentColor
+                } else {
+                    var errorMsg = "Failed"
+                    if let data = data,
+                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let err = json["error"] as? String {
+                        errorMsg = err
+                    }
+                    self.registerKeyButton.setTitle(errorMsg, for: .normal)
+                    self.registerKeyButton.tintColor = .systemRed
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                        self.loadUsername()
+                        self.registerKeyButton.tintColor = self.accentColor
+                    }
+                }
+            }
+        }.resume()
+    }
+
+    /// Also register the key with a display name (backwards compat with /api/keys/register).
+    private func doRegisterName(publicKey: String, name: String) {
+        guard let signature = try? CryptoEngine.signRegistrationChallenge(name: name).signature else { return }
 
         let url = URL(string: "https://www.keywitness.io/api/keys/register")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        let payload: [String: String] = ["publicKey": publicKey, "name": name, "signature": signature]
-        request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
-
-        registerKeyButton.isEnabled = false
-        registerKeyButton.setTitle("Registering...", for: .normal)
-
-        URLSession.shared.dataTask(with: request) { [weak self] _, response, error in
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200, error == nil {
-                    self.registerKeyButton.setTitle("Registered as \"\(name)\"", for: .normal)
-                    self.registerKeyButton.tintColor = .systemGreen
-                } else {
-                    self.registerKeyButton.setTitle("Failed", for: .normal)
-                    self.registerKeyButton.tintColor = .systemRed
-                }
-                self.registerKeyButton.isEnabled = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                    self.registerKeyButton.setTitle("Register Key", for: .normal)
-                    self.registerKeyButton.tintColor = self.accentColor
-                }
-            }
-        }.resume()
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "publicKey": publicKey, "name": name, "signature": signature,
+        ])
+        URLSession.shared.dataTask(with: request) { _, _, _ in }.resume()
     }
 
     // MARK: - Keyboard Dismiss
@@ -737,7 +812,10 @@ extension MainViewController: UNUserNotificationCenterDelegate {
             defaults?.removeObject(forKey: "pendingBiometricCreatedAt")
             defaults?.removeObject(forKey: "pendingBiometricCleartext")
 
-            startLiveActivity(shortId: shortId, cleartext: cleartext)
+            // Delay — app may not be fully foregrounded yet
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                self?.startLiveActivity(shortId: shortId, cleartext: cleartext)
+            }
             showBiometricConfirmation(shortId: shortId, cleartext: cleartext)
         }
         completionHandler()

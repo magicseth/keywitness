@@ -34,6 +34,8 @@ export const upload = mutation({
   args: {
     attestation: v.string(),
     deviceVerified: v.optional(v.boolean()),
+    username: v.optional(v.string()),
+    usernameSeq: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     // Size limit
@@ -94,6 +96,8 @@ export const upload = mutation({
       createdAt: Date.now(),
       deviceVerified: args.deviceVerified || undefined,
       statusIndex,
+      username: args.username,
+      usernameSeq: args.usernameSeq,
     });
     return {
       id: shortId,

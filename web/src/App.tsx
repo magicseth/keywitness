@@ -13,8 +13,17 @@ export default function App() {
     return <Developers />;
   }
 
-  const match = path.match(/^\/v\/([a-zA-Z0-9]+)$/);
-  const shortId = match ? match[1] : undefined;
+  // /v/{shortId} — direct short ID
+  const shortIdMatch = path.match(/^\/v\/([a-zA-Z0-9]+)$/);
+  if (shortIdMatch) {
+    return <Verify shortId={shortIdMatch[1]} />;
+  }
 
-  return <Verify shortId={shortId} />;
+  // /{username}/{seq} — typed.by vanity URL
+  const vanityMatch = path.match(/^\/([a-zA-Z][a-zA-Z0-9_-]{2,29})\/(\d+)$/);
+  if (vanityMatch) {
+    return <Verify username={vanityMatch[1]} usernameSeq={parseInt(vanityMatch[2], 10)} />;
+  }
+
+  return <Verify />;
 }

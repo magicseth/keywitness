@@ -54,6 +54,11 @@ interface BadgeHandle {
   update(shortId: string): void;
 }
 
+// ── Presence signal ─────────────────────────────────────────────────────────
+
+/** LTR mark + RTL mark — inserted then immediately deleted by the keyboard. */
+const SIGNAL = "\u200E\u200F";
+
 // ── SDK ──────────────────────────────────────────────────────────────────────
 
 const KeyWitness = {
@@ -171,7 +176,38 @@ const KeyWitness = {
   },
 
   /**
-   * Auto-render badges for all elements with data-keywitness attribute.
+   * Require the KeyWitness keyboard on a textarea/input.
+   * Listens for the invisible presence signal (U+200E U+200F) that the
+   * keyboard emits on first keystroke. Calls `onDetected` when seen,
+   * or `onMissing` when the user types without the keyboard.
+   * Returns a cleanup function.
+   */
+  require(
+    target: HTMLTextAreaElement | HTMLInputElement | string,
+    callbacks: { onDetected?: () => void; onMissing?: () => void },
+  ): () => void {
+    const el = typeof target === "string"
+      ? document.querySelector<HTMLTextAreaElement | HTMLInputElement>(target)
+      : target;
+    if (!el) throw new Error(`KeyWitness: element not found: ${target}`);
+    let detected = false;
+    const handler = () => {
+      if (detected) return;
+      const val = el.value;
+      if (val.includes(SIGNAL)) {
+        detected = true;
+        callbacks.onDetected?.();
+      } else if (val.length > 0 && !detected) {
+        callbacks.onMissing?.();
+      }
+    };
+    el.addEventListener("input", handler);
+    return () => el.removeEventListener("input", handler);
+  },
+
+  /**
+   * Auto-render badges for all elements with data-keywitness attribute,
+   * and auto-require on elements with data-keywitness-required.
    */
   autoRender() {
     document.querySelectorAll<HTMLElement>("[data-keywitness]").forEach((el) => {
@@ -183,6 +219,26 @@ const KeyWitness = {
         el.setAttribute("data-keywitness-rendered", "true");
         KeyWitness.badge(el, shortId, { style, theme });
       }
+    });
+
+    document.querySelectorAll<HTMLTextAreaElement | HTMLInputElement>("[data-keywitness-required]").forEach((el) => {
+      if (el.getAttribute("data-keywitness-required-bound")) return;
+      el.setAttribute("data-keywitness-required-bound", "true");
+
+      // Create status element
+      const status = document.createElement("div");
+      status.setAttribute("data-keywitness-status", "");
+      status.style.cssText = "font-size:13px;margin:6px 0;";
+      el.parentNode?.insertBefore(status, el.nextSibling);
+
+      KeyWitness.require(el, {
+        onDetected() {
+          status.innerHTML = `<span style="color:#22c55e">\u2713 KeyWitness keyboard detected</span>`;
+        },
+        onMissing() {
+          status.innerHTML = `<span style="color:#f59e0b">\u26A0 This field requires the <a href="${ORIGIN}" target="_blank" rel="noopener" style="color:#3b82f6;text-decoration:underline">KeyWitness keyboard</a></span>`;
+        },
+      });
     });
   },
 };

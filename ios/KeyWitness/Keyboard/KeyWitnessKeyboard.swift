@@ -2,8 +2,7 @@ import UIKit
 import UserNotifications
 import KeyboardKit
 import SwiftUI
-// Note: Keyboard extensions cannot start Live Activities (Apple restriction).
-// The main app starts them when the notification is tapped.
+import ActivityKit
 
 /// KeyWitnessKeyboard uses KeyboardKit for full keyboard layout (letters, numbers,
 /// symbols, globe) and overlays a transparent touch tracker to capture biometric
@@ -26,7 +25,8 @@ class KeyWitnessKeyboard: KeyboardInputViewController {
     // MARK: - State
 
     var keystrokeEvents: [KeystrokeEvent] = []
-    var touchTracker: BiometricTouchTracker?
+    var composedText = ""  // Running cleartext built from keystrokes + backspaces
+    var touchTracker: TouchCaptureOverlay?
     var pendingTouchDown: (time: TimeInterval, x: CGFloat, y: CGFloat, force: CGFloat, radius: CGFloat)?
     var isAttesting = false
     var hasInsertedSignal = false
@@ -63,6 +63,8 @@ class KeyWitnessKeyboard: KeyboardInputViewController {
         super.viewDidAppear(animated)
         installTouchTracker()
         hasInsertedSignal = false
+        keystrokeEvents.removeAll()
+        composedText = ""
     }
 
     // MARK: - Touch Tracking Overlay
@@ -70,23 +72,19 @@ class KeyWitnessKeyboard: KeyboardInputViewController {
     private func installTouchTracker() {
         guard touchTracker == nil, let inputView = self.inputView else { return }
 
-        let tracker = BiometricTouchTracker { [weak self] touchData in
-            if touchData.phase == .began {
-                self?.pendingTouchDown = (
-                    time: touchData.timestamp,
-                    x: touchData.x,
-                    y: touchData.y,
-                    force: touchData.force,
-                    radius: touchData.radius
-                )
-            }
+        let overlay = TouchCaptureOverlay { [weak self] point, force, radius in
+            self?.pendingTouchDown = (
+                time: ProcessInfo.processInfo.systemUptime,
+                x: point.x,
+                y: point.y,
+                force: force,
+                radius: radius
+            )
         }
-        tracker.cancelsTouchesInView = false
-        tracker.delaysTouchesBegan = false
-        tracker.delaysTouchesEnded = false
-        tracker.delegate = tracker
-        inputView.addGestureRecognizer(tracker)
-        self.touchTracker = tracker
+        overlay.frame = inputView.bounds
+        overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        inputView.addSubview(overlay)
+        self.touchTracker = overlay
     }
 
     /// Insert then immediately delete an invisible two-character signal so
@@ -121,6 +119,18 @@ class KeyWitnessKeyboard: KeyboardInputViewController {
             majorRadius: down?.radius ?? 0
         )
         keystrokeEvents.append(keystroke)
+
+        // Maintain running cleartext
+        switch key {
+        case "backspace":
+            if !composedText.isEmpty { composedText.removeLast() }
+        case "space":
+            composedText.append(" ")
+        case "newline":
+            composedText.append("\n")
+        default:
+            composedText.append(key)
+        }
     }
 
     // MARK: - Attestation
@@ -128,9 +138,9 @@ class KeyWitnessKeyboard: KeyboardInputViewController {
     func attestTapped() {
         guard !isAttesting else { return }
 
-        let beforeCursor = textDocumentProxy.documentContextBeforeInput ?? ""
-        let afterCursor = textDocumentProxy.documentContextAfterInput ?? ""
-        let cleartext = beforeCursor + afterCursor
+        // Use composed text built from tracked keystrokes (including backspaces)
+        // rather than textDocumentProxy, which doesn't reflect our keystroke history.
+        let cleartext = composedText
 
         guard !cleartext.isEmpty else { return }
 
@@ -176,20 +186,53 @@ class KeyWitnessKeyboard: KeyboardInputViewController {
                             self.textDocumentProxy.insertText(shortURL)
 
                             self.storePendingBiometric(shortId: shortId, cleartext: cleartext)
+                            self.startLiveActivity(shortId: shortId, cleartext: cleartext)
                             self.fireBiometricNotification(shortId: shortId, cleartext: cleartext)
 
                         case .failure:
                             self.textDocumentProxy.insertText("\n\n" + attestationBlock)
                         }
                         self.keystrokeEvents.removeAll()
+                        self.composedText = ""
                     }
                 }
             } catch {
                 await MainActor.run {
                     self.isAttesting = false
                     self.keystrokeEvents.removeAll()
+                    self.composedText = ""
                     self.textDocumentProxy.insertText("\n[Attestation error: \(error.localizedDescription)]")
                 }
+            }
+        }
+    }
+
+    // MARK: - Live Activity
+
+    private func startLiveActivity(shortId: String, cleartext: String) {
+        if #available(iOSApplicationExtension 16.2, *) {
+            let messagePreview: String
+            if cleartext.count > 100 {
+                messagePreview = String(cleartext.prefix(100)) + "..."
+            } else {
+                messagePreview = cleartext
+            }
+
+            let attributes = KeyWitnessVerificationAttributes(
+                shortId: shortId,
+                messagePreview: messagePreview,
+                expiresAt: Date().addingTimeInterval(60)
+            )
+            let state = KeyWitnessVerificationAttributes.ContentState(status: "waiting")
+            do {
+                let activity = try Activity.request(
+                    attributes: attributes,
+                    content: .init(state: state, staleDate: Date().addingTimeInterval(60)),
+                    pushType: nil
+                )
+                NSLog("[KeyWitness] Live Activity started from keyboard: id=%@, shortId=%@", activity.id, shortId)
+            } catch {
+                NSLog("[KeyWitness] Failed to start Live Activity from keyboard: %@", error.localizedDescription)
             }
         }
     }
@@ -278,7 +321,8 @@ class KeyWitnessKeyboard: KeyboardInputViewController {
                 if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                    let attestationURL = json["url"] as? String,
                    let shortId = json["id"] as? String {
-                    completion(.success((attestationURL + "#" + encryptionKey, shortId)))
+                    let fragment = EmojiKey.encode(encryptionKey) ?? encryptionKey
+                    completion(.success((attestationURL + "#" + fragment, shortId)))
                 } else {
                     completion(.failure(UploadError.unexpectedResponse))
                 }
@@ -315,13 +359,17 @@ class KeyWitnessActionHandler: KeyboardAction.StandardActionHandler {
         _ gesture: Keyboard.Gesture,
         on action: KeyboardAction
     ) {
-        // Record character keystrokes for biometrics on release
+        // Record keystrokes for biometrics on release
         if gesture == .release {
             switch action {
             case .character(let char):
                 keyboard?.recordKeystroke(key: char)
             case .space:
                 keyboard?.recordKeystroke(key: "space")
+            case .backspace:
+                keyboard?.recordKeystroke(key: "backspace")
+            case .primary(.newLine), .primary(.return):
+                keyboard?.recordKeystroke(key: "newline")
             default:
                 break
             }
@@ -390,55 +438,34 @@ struct KeyWitnessKeyboardView: View {
     }
 }
 
-// MARK: - Biometric Touch Tracker
+// MARK: - Touch Capture Overlay
 
-struct BiometricTouchData {
-    let timestamp: TimeInterval
-    let x: CGFloat
-    let y: CGFloat
-    let force: CGFloat
-    let radius: CGFloat
-    let phase: UITouch.Phase
-}
+/// Transparent overlay that captures touch-down coordinates and biometric data
+/// then passes touches through to the keyboard below.
+/// Uses hitTest to observe touches without blocking them — more reliable than
+/// a UIGestureRecognizer, which SwiftUI's gesture system can swallow.
+class TouchCaptureOverlay: UIView {
 
-/// Passively captures touch biometric data without interfering with KeyboardKit gestures.
-class BiometricTouchTracker: UIGestureRecognizer, UIGestureRecognizerDelegate {
+    private let onTouchDown: (CGPoint, CGFloat, CGFloat) -> Void
 
-    private let onTouch: (BiometricTouchData) -> Void
-
-    init(onTouch: @escaping (BiometricTouchData) -> Void) {
-        self.onTouch = onTouch
-        super.init(target: nil, action: nil)
+    init(onTouchDown: @escaping (CGPoint, CGFloat, CGFloat) -> Void) {
+        self.onTouchDown = onTouchDown
+        super.init(frame: .zero)
+        backgroundColor = .clear
+        isUserInteractionEnabled = true
     }
 
-    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
-        super.touchesBegan(touches, with: event)
-        for touch in touches {
-            let loc = touch.location(in: self.view)
-            onTouch(BiometricTouchData(
-                timestamp: ProcessInfo.processInfo.systemUptime,
-                x: loc.x, y: loc.y,
-                force: touch.force,
-                radius: touch.majorRadius,
-                phase: .began
-            ))
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        // Capture touch data from the event, then return nil to pass through
+        if let touches = event?.allTouches {
+            for touch in touches where touch.phase == .began {
+                let loc = touch.location(in: self)
+                onTouchDown(loc, touch.force, touch.majorRadius)
+            }
         }
-        state = .possible
-    }
-
-    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
-        super.touchesEnded(touches, with: event)
-        state = .possible
-    }
-
-    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
-        super.touchesCancelled(touches, with: event)
-        state = .possible
-    }
-
-    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
-                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
-        return true
+        return nil
     }
 }
 

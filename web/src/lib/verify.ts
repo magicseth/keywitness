@@ -58,6 +58,8 @@ export interface VerificationResult {
   error?: string;
   encrypted?: boolean;
   decryptionFailed?: boolean;
+  cleartextHash?: string;
+  cleartextLength?: number;
   // v3 multi-proof results
   proofs?: ProofVerificationResult[];
   // Trust status (fetched separately after verification)
@@ -297,6 +299,8 @@ async function verifyV3(
     appVersion: vc.credentialSubject.appVersion,
     encrypted: !!vc.credentialSubject.encryptedCleartext,
     decryptionFailed: decryptionFailed ? true : undefined,
+    cleartextHash: vc.credentialSubject.cleartextHash,
+    cleartextLength: vc.credentialSubject.cleartextLength,
     proofs: vcResult.proofs,
     error: vcResult.valid
       ? undefined

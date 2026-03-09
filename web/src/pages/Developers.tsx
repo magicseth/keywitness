@@ -169,6 +169,45 @@ const result = await resp.json();`}</Code>
             </p>
           </Section>
 
+          {/* Username API */}
+          <Section title="Username API">
+            <p>
+              Users can claim a username to get short links like <code className="bg-[#1f2937] px-1.5 py-0.5 rounded text-green-400 text-xs">typed.by/username/1</code>.
+              Usernames are bound to Ed25519 public keys.
+            </p>
+
+            <h4 className="text-gray-300 font-medium mt-4 mb-2">
+              <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-green-900/30 text-green-400 mr-2">POST</span>
+              /api/usernames/claim
+            </h4>
+            <p>Claim a username. Requires a public key and recovery email.</p>
+            <Code>{`const resp = await fetch('https://keywitness.io/api/usernames/claim', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    username: 'magicseth',
+    publicKey: '<base64url Ed25519 public key>',
+    email: 'recovery@example.com'
+  })
+});
+// 201: { "username": "magicseth", "alreadyClaimed": false }
+// 409: { "error": "Username is already taken." }`}</Code>
+
+            <h4 className="text-gray-300 font-medium mt-6 mb-2">
+              <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-blue-900/30 text-blue-400 mr-2">GET</span>
+              /api/resolve?username=&#123;name&#125;&amp;seq=&#123;n&#125;
+            </h4>
+            <p>Resolve a vanity URL to its attestation short ID.</p>
+            <Code>{`const resp = await fetch('https://keywitness.io/api/resolve?username=magicseth&seq=42');
+// 200: { "shortId": "aBcDeFg123" }
+// 404: { "error": "Not found" }`}</Code>
+            <p className="mt-2">
+              When a user with a claimed username seals text, the server automatically
+              assigns a sequential number and returns a <code className="bg-[#1f2937] px-1.5 py-0.5 rounded text-green-400 text-xs">typed.by</code> URL
+              instead of the default <code className="bg-[#1f2937] px-1.5 py-0.5 rounded text-green-400 text-xs">keywitness.io/v/</code> URL.
+            </p>
+          </Section>
+
           {/* oEmbed & Social Previews */}
           <Section title="Social Previews">
             <p>

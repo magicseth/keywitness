@@ -16,8 +16,22 @@ export default defineSchema({
     deviceVerified: v.optional(v.boolean()),
     /** Index into the status bitstring for revocation checking */
     statusIndex: v.optional(v.number()),
+    /** Username and sequential number for typed.by URLs */
+    username: v.optional(v.string()),
+    usernameSeq: v.optional(v.number()),
   }).index("by_shortId", ["shortId"])
-    .index("by_attestationHash", ["attestationHash"]),
+    .index("by_attestationHash", ["attestationHash"])
+    .index("by_username_seq", ["username", "usernameSeq"]),
+
+  usernames: defineTable({
+    username: v.string(),
+    email: v.string(),
+    /** Base64url Ed25519 public keys authorized for this username */
+    publicKeys: v.array(v.string()),
+    /** Next sequential attestation number */
+    nextSeq: v.number(),
+    createdAt: v.number(),
+  }).index("by_username", ["username"]),
 
   keys: defineTable({
     publicKey: v.string(),

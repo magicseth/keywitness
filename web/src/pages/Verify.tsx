@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { verifyAttestation, VerificationResult, KeystrokeTiming, ProofVerificationResult, TrustStatus } from "../lib/verify";
+import { decodeStegKey } from "../lib/stegkey";
 import Nav from "../components/Nav";
 
 // ── Cleartext attribution helpers ───────────────────────────────────────────
@@ -53,36 +54,21 @@ function attributeCleartext(
 
 // ── Cleartext with attribution component ────────────────────────────────────
 
-function CleartextWithAttribution({ cleartext, timings, encrypted }: {
+function CleartextWithAttribution({ cleartext, timings }: {
   cleartext: string;
   timings: KeystrokeTiming[] | undefined;
   encrypted?: boolean;
 }) {
   const attribution = attributeCleartext(cleartext, timings);
   const hasUnattested = attribution.some((a) => !a.attested);
-  const attestedCount = attribution.filter((a) => a.attested && /[a-zA-Z0-9]/.test(a.char)).length;
-  const totalAlpha = attribution.filter((a) => /[a-zA-Z0-9]/.test(a.char)).length;
 
   return (
     <div>
-      <div className="text-xs text-gray-500 uppercase tracking-wider mb-1 flex items-center gap-2">
-        What they wrote
-        {encrypted && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/50 text-blue-400 font-medium uppercase">
-            Decrypted
-          </span>
-        )}
-        {hasUnattested && totalAlpha > 0 && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-900/50 text-yellow-400 font-medium">
-            {attestedCount}/{totalAlpha} characters verified
-          </span>
-        )}
-      </div>
-      <div className="text-base leading-relaxed bg-black/30 rounded-lg p-4 break-all">
+      <div className="text-xl leading-relaxed break-words">
         {attribution.map((a, i) => (
           <span
             key={i}
-            className={a.attested ? "text-gray-200" : "text-red-400/70"}
+            className={a.attested ? "text-white" : "text-red-400/60"}
             title={a.attested ? undefined : "Not typed on KeyWitness keyboard"}
           >
             {a.char}
@@ -90,9 +76,9 @@ function CleartextWithAttribution({ cleartext, timings, encrypted }: {
         ))}
       </div>
       {hasUnattested && (
-        <div className="text-xs text-gray-600 mt-1.5 flex items-center gap-1.5">
-          <span className="inline-block w-2 h-2 rounded-full bg-red-400/70" />
-          Not typed on KeyWitness keyboard
+        <div className="text-[11px] text-gray-600 mt-2 flex items-center gap-1.5">
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-400/60" />
+          Red text was not typed on KeyWitness keyboard
         </div>
       )}
     </div>
@@ -105,6 +91,26 @@ interface KnownKeyEntry {
   name: string;
   savedAt: number;
 }
+
+// ── Text normalization for hash comparison ───────────────────────────────────
+
+const SEAL_URL_RE = /\s*(?:https?:\/\/)?(?:typed\.by\/[A-Za-z0-9_-]+\/\d+|keywitness\.io\/v\/[A-Za-z0-9]+)(?:#[^\s]*)?\s*$/;
+
+/** Strip a KeyWitness/typed.by seal link and trailing whitespace from pasted text. */
+function normalizePastedText(text: string): string {
+  return text.replace(SEAL_URL_RE, "");
+}
+
+async function sha256Base64url(text: string): Promise<string> {
+  const data = new TextEncoder().encode(text);
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  const bytes = new Uint8Array(hash);
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+// ── Known keys localStorage helpers ─────────────────────────────────────────
 
 const KNOWN_KEYS_STORAGE_KEY = "keywitness-known-keys";
 
@@ -149,56 +155,6 @@ function formatTimestampShort(iso: string): string {
   }
 }
 
-function VerifiedCheck({ title }: { title: string }) {
-  return (
-    <span
-      className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-green-500/20 text-green-400 text-[10px] font-bold flex-shrink-0"
-      title={title}
-    >
-      {"\u2713"}
-    </span>
-  );
-}
-
-function VerificationBadge({ verified, label, title }: { verified: boolean; label: React.ReactNode; title: string }) {
-  return (
-    <span
-      className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full font-medium ${
-        verified
-          ? "bg-green-900/30 text-green-400 border border-green-900/50"
-          : "bg-gray-800/50 text-gray-500 border border-gray-700/50"
-      }`}
-      title={title}
-    >
-      <span className={`w-3 h-3 rounded-full flex items-center justify-center text-[8px] font-bold ${
-        verified ? "bg-green-500/30 text-green-400" : "bg-gray-700 text-gray-500"
-      }`}>
-        {verified ? "\u2713" : "\u2013"}
-      </span>
-      {label}
-    </span>
-  );
-}
-
-function formatTimestamp(iso: string): string {
-  try {
-    const date = new Date(iso);
-    if (isNaN(date.getTime())) return iso;
-    return date.toLocaleString(undefined, {
-      weekday: "short",
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      timeZoneName: "short",
-    });
-  } catch {
-    return iso;
-  }
-}
-
 function proofTypeLabel(proofType: string): string {
   switch (proofType) {
     case "keystrokeAttestation": return "Keystroke Attestation";
@@ -210,17 +166,7 @@ function proofTypeLabel(proofType: string): string {
   }
 }
 
-function proofTypeIcon(proofType: string, valid: boolean): string {
-  if (!valid) return "x";
-  switch (proofType) {
-    case "keystrokeAttestation": return "K";
-    case "biometricVerification": return "F";
-    case "deviceAttestation": return "D";
-    default: return "P";
-  }
-}
-
-export default function Verify({ shortId }: { shortId?: string }) {
+export default function Verify({ shortId, username, usernameSeq }: { shortId?: string; username?: string; usernameSeq?: number }) {
   const [input, setInput] = useState("");
   const [result, setResult] = useState<VerificationResult | null>(null);
   const [verifying, setVerifying] = useState(false);
@@ -230,11 +176,43 @@ export default function Verify({ shortId }: { shortId?: string }) {
   const [keyNameInput, setKeyNameInput] = useState("");
   const [, setKnownKeyVersion] = useState(0);
   const [trustStatus, setTrustStatus] = useState<TrustStatus | null>(null);
+  const [resolvedShortId, setResolvedShortId] = useState<string | undefined>(undefined);
 
-  const encryptionKey = window.location.hash.slice(1) || undefined;
+  // Resolve typed.by vanity URL (username/seq) to shortId
+  useEffect(() => {
+    if (username && usernameSeq) {
+      fetch(`/api/resolve?username=${encodeURIComponent(username)}&seq=${usernameSeq}`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.shortId) setResolvedShortId(data.shortId);
+        })
+        .catch(() => {});
+    }
+  }, [username, usernameSeq]);
+
+  // Try to extract the encryption key from the URL fragment.
+  // It may be a plain base64url key, emoji encoding, or old zero-width encoding.
+  // Some browsers percent-encode emoji in hash fragments, so decode first.
+  const encryptionKey = (() => {
+    const rawFragment = window.location.hash.slice(1);
+    if (!rawFragment) return undefined;
+    // Percent-decode in case browser encoded the emoji
+    let fragment: string;
+    try {
+      fragment = decodeURIComponent(rawFragment);
+    } catch {
+      fragment = rawFragment;
+    }
+    // Try emoji/steg decode first
+    const steg = decodeStegKey(fragment);
+    if (steg) return steg;
+    // Otherwise treat as plain base64url key
+    return fragment;
+  })();
+  const [hashMatchResult, setHashMatchResult] = useState<"match" | "mismatch" | null>(null);
 
   const params = new URLSearchParams(window.location.search);
-  const queryId = params.get("a") || shortId;
+  const queryId = params.get("a") || shortId || resolvedShortId;
 
   const attestationDoc = useQuery(
     api.attestations.getByShortId,
@@ -334,250 +312,244 @@ export default function Verify({ shortId }: { shortId?: string }) {
 
             {/* ── Error / Invalid state ── */}
             {(isError || status === "invalid") && (
-              <div className={`rounded-xl p-6 mb-6 ${
+              <div className={`rounded-2xl p-8 mb-6 ${
                 status === "invalid"
-                  ? "bg-red-950/30 border border-red-900/40"
-                  : "bg-yellow-950/30 border border-yellow-900/40"
+                  ? "bg-red-950/20 border border-red-900/30"
+                  : "bg-yellow-950/20 border border-yellow-900/30"
               }`}>
-                <div className="flex items-center gap-3">
-                  <span className={`inline-flex items-center justify-center w-10 h-10 rounded-full text-lg font-bold ${
-                    status === "invalid"
-                      ? "bg-red-500/20 text-red-400"
-                      : "bg-yellow-500/20 text-yellow-400"
-                  }`}>
-                    {status === "invalid" ? "!" : "?"}
-                  </span>
-                  <div>
-                    <div className={`text-xl font-bold ${status === "invalid" ? "text-red-400" : "text-yellow-400"}`}>
-                      {status === "invalid" ? "Suspicious" : "Error"}
-                    </div>
-                    <div className="text-gray-500 text-sm">
-                      {status === "invalid"
-                        ? "Something doesn't add up. This may have been altered or faked."
-                        : ""}
-                    </div>
-                  </div>
+                <div className={`text-xl font-bold mb-2 ${status === "invalid" ? "text-red-400" : "text-yellow-400"}`}>
+                  {status === "invalid" ? "Verification failed" : "Error"}
+                </div>
+                <div className="text-gray-500 text-sm">
+                  {status === "invalid"
+                    ? "This attestation could not be verified. It may have been altered."
+                    : ""}
                 </div>
                 {result.error && (
-                  <p className="text-red-400 text-sm mt-3">{result.error}</p>
+                  <p className="text-red-400/80 text-sm mt-2 font-mono">{result.error}</p>
                 )}
               </div>
             )}
 
-            {/* ── Verified: natural sentence layout ── */}
+            {/* ── Verified ── */}
             {!isError && status === "verified" && (
-              <div className="rounded-xl p-6 mb-6 bg-[#111111] border border-gray-800">
-                {/* Sentence: Human [Name] wrote ... */}
-                <div className="mb-5">
-                  <div className="text-2xl font-bold text-white leading-snug">
-                    <span className="text-gray-400">Human </span>
-                    <span className="text-white inline-flex items-center gap-1.5">
-                      {writerName || (keyRecord === null ? "Someone" : "...")}
-                      {writerName && <VerifiedCheck title="Registered identity" />}
-                    </span>
-                    <span className="text-gray-400"> wrote</span>
-                  </div>
-                </div>
-
-                {/* The message */}
-                {result.cleartext ? (
-                  <CleartextWithAttribution cleartext={result.cleartext} timings={result.keystrokeTimings} encrypted={result.encrypted} />
-                ) : result.encrypted && !result.cleartext ? (
-                  <div>
-                    <div className="text-gray-500 text-sm italic mb-3">
-                      {result.decryptionFailed
-                        ? "Couldn't unlock the message. The link may be incomplete."
-                        : "This message is encrypted. Open the full link from the sender, or paste the text below."}
-                    </div>
-                    <textarea
-                      className="w-full h-24 bg-[#0a0a0a] border border-gray-700 rounded-lg p-3 font-mono text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-gray-600 focus:ring-1 focus:ring-gray-600 resize-y mb-2"
-                      placeholder="Paste the original text here to check if it matches..."
-                      value={manualCleartext}
-                      onChange={(e) => setManualCleartext(e.target.value)}
-                    />
-                    <button
-                      onClick={() => handleVerify(input, manualCleartext)}
-                      disabled={verifying || !manualCleartext.trim()}
-                      className="px-4 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                    >
-                      Check match
-                    </button>
-                  </div>
-                ) : null}
-
-                {/* Context line: with an iPhone on Mon Mar 9 */}
-                <div className="mt-4 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-gray-500">
-                  <span>with</span>
-                  {hasDeviceVerification ? (
-                    <span className="inline-flex items-center gap-1 text-white font-medium">
-                      an iPhone <VerifiedCheck title="Real Apple device confirmed" />
-                    </span>
-                  ) : (
-                    <span className="text-gray-400">an unverified device</span>
-                  )}
-                  {result.timestamp && (
-                    <>
-                      <span>on</span>
-                      <span className="inline-flex items-center gap-1 text-white font-medium">
-                        {formatTimestampShort(result.timestamp)} <VerifiedCheck title="Cryptographically signed timestamp" />
-                      </span>
-                    </>
-                  )}
-                </div>
-
-                {/* Verification badges row */}
-                <div className="mt-4 pt-4 border-t border-gray-800 flex flex-wrap gap-3">
-                  <VerificationBadge
-                    verified={true}
-                    label="Signature valid"
-                    title="Message hasn't been tampered with"
-                  />
-                  <VerificationBadge
-                    verified={hasKeystrokeData}
-                    label="Keystroke data"
-                    title={hasKeystrokeData ? "Typed by a person (not copy-pasted)" : "No keystroke biometrics recorded"}
-                  />
-                  <VerificationBadge
-                    verified={hasDeviceVerification}
-                    label="Real device"
-                    title={hasDeviceVerification ? "Confirmed real Apple device via App Attest" : "Device not confirmed"}
-                  />
-                  <VerificationBadge
-                    verified={hasFaceId}
-                    label={hasFaceId ? (
-                      <>
-                        Face ID
-                        {attestationDoc?.biometricTimestamp && (
-                          <span className="text-gray-600 font-normal"> {Math.round((attestationDoc.biometricTimestamp - attestationDoc.createdAt) / 1000)}s</span>
+              <div className="space-y-6">
+                {/* The message — front and center */}
+                <div className="rounded-2xl bg-[#111111] border border-gray-800/60 overflow-hidden">
+                  {/* Message content */}
+                  <div className="p-8">
+                    {result.cleartext ? (
+                      <blockquote className="text-xl leading-relaxed text-white font-light">
+                        <CleartextWithAttribution cleartext={result.cleartext} timings={result.keystrokeTimings} encrypted={result.encrypted} />
+                      </blockquote>
+                    ) : result.encrypted && !result.cleartext ? (
+                      <div>
+                        {result.cleartextLength ? (
+                          <div className="text-2xl text-white font-light mb-4">
+                            {result.cleartextLength} characters were typed
+                          </div>
+                        ) : null}
+                        <div className="text-gray-500 text-sm mb-3">
+                          Paste the message you received to verify it matches exactly.
+                        </div>
+                        <textarea
+                          className="w-full h-24 bg-[#0a0a0a] border border-gray-700 rounded-lg p-3 text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-gray-600 focus:ring-1 focus:ring-gray-600 resize-y mb-2"
+                          placeholder="Paste the text here..."
+                          value={manualCleartext}
+                          onChange={(e) => {
+                            setManualCleartext(e.target.value);
+                            setHashMatchResult(null);
+                          }}
+                        />
+                        {hashMatchResult === "match" ? (
+                          <div className="flex items-center gap-2 text-green-400 text-sm font-medium">
+                            <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none">
+                              <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" />
+                              <path d="M5 8l2 2 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                            Text matches — this is exactly what was typed
+                          </div>
+                        ) : hashMatchResult === "mismatch" ? (
+                          <div className="text-red-400 text-sm">
+                            {"\u2717"} Text does not match the sealed message
+                          </div>
+                        ) : (
+                          <button
+                            onClick={async () => {
+                              const normalized = normalizePastedText(manualCleartext);
+                              const hash = await sha256Base64url(normalized);
+                              setHashMatchResult(hash === result.cleartextHash ? "match" : "mismatch");
+                            }}
+                            disabled={!manualCleartext.trim()}
+                            className="px-4 py-1.5 bg-white text-black text-sm font-medium rounded-lg hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                          >
+                            Verify match
+                          </button>
                         )}
-                      </>
-                    ) : "Face ID"}
-                    title={hasFaceId ? "Sender confirmed identity with Face ID" : "Face ID not confirmed"}
-                  />
-                </div>
-              </div>
-            )}
+                      </div>
+                    ) : null}
 
-            {/* Trust warnings */}
-            {trustStatus && (trustStatus.keyRevoked || trustStatus.credentialRevoked || trustStatus.appVersionTrusted === false) && (
-              <div className="rounded-lg px-5 py-3 bg-orange-950/50 border border-orange-900/50 mb-6">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="inline-block w-2 h-2 rounded-full bg-orange-400" />
-                  <span className="text-orange-400 text-xs font-semibold uppercase tracking-wide">Trust Warning</span>
-                </div>
-                <div className="space-y-1 text-sm text-orange-300">
-                  {trustStatus.keyRevoked && (
-                    <p>Signing key has been revoked{trustStatus.keyRevocationReason ? `: ${trustStatus.keyRevocationReason}` : "."}</p>
-                  )}
-                  {trustStatus.credentialRevoked && (
-                    <p>Device credential has been revoked{trustStatus.credentialRevocationReason ? `: ${trustStatus.credentialRevocationReason}` : "."}</p>
-                  )}
-                  {trustStatus.appVersionTrusted === false && (
-                    <p>App version is no longer trusted{trustStatus.appVersionRevocationReason ? `: ${trustStatus.appVersionRevocationReason}` : "."}</p>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* ── Details (collapsed) ── */}
-            {!isError && (
-              <details className="group border border-gray-800 rounded-lg overflow-hidden mb-6">
-                <summary className="px-5 py-3 bg-[#111111] cursor-pointer text-sm text-gray-400 hover:text-gray-300 transition-colors flex items-center gap-2">
-                  <span className="text-gray-600 group-open:rotate-90 transition-transform">{"\u25B6"}</span>
-                  Technical details
-                </summary>
-                <div className="divide-y divide-gray-800">
-                  {/* Device */}
-                  <div className="px-5 py-3 bg-[#111111]">
-                    <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">Device</div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-gray-200 text-sm">{result.deviceId}</span>
-                      {attestationDoc?.deviceVerified ? (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-900/50 text-green-400 font-medium">Real Apple device</span>
-                      ) : result?.appAttestPresent ? (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-900/50 text-yellow-400 font-medium">Unconfirmed</span>
+                    {/* Attribution line */}
+                    <div className="mt-6 flex items-center gap-2 text-sm text-gray-500">
+                      <span className="text-gray-400 font-medium">
+                        {writerName || (keyRecord === null ? "Someone" : "...")}
+                      </span>
+                      <span className="text-gray-700">{"\u00B7"}</span>
+                      {hasDeviceVerification ? (
+                        <span className="text-gray-400">iPhone</span>
                       ) : (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-800 text-gray-500 font-medium">Not verified</span>
+                        <span>unverified device</span>
+                      )}
+                      {result.timestamp && (
+                        <>
+                          <span className="text-gray-700">{"\u00B7"}</span>
+                          <span>{formatTimestampShort(result.timestamp)}</span>
+                        </>
                       )}
                     </div>
                   </div>
 
-                  {/* Proof Chain */}
-                  {result.proofs && result.proofs.length > 0 && (
-                    <ProofChain proofs={result.proofs} />
-                  )}
-
-                  {/* Issuer DID */}
-                  {result.issuerDID && (
-                    <div className="px-5 py-3 bg-[#111111]">
-                      <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">Issuer DID</div>
-                      <div className="text-gray-400 text-xs font-mono break-all">{result.issuerDID}</div>
+                  {/* Verification strip */}
+                  <div className="px-8 py-4 bg-green-950/20 border-t border-green-900/20 flex items-center gap-6">
+                    <div className="flex items-center gap-2 text-green-400 text-sm font-medium">
+                      <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none">
+                        <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" />
+                        <path d="M5 8l2 2 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                      Verified
                     </div>
-                  )}
+                    <div className="flex items-center gap-4 text-xs text-gray-500">
+                      <span className={hasKeystrokeData ? "text-green-400/70" : ""} title={hasKeystrokeData ? "Typed by a person" : "No keystroke data"}>
+                        {hasKeystrokeData ? "\u2713" : "\u2013"} Keystrokes
+                      </span>
+                      <span className={hasDeviceVerification ? "text-green-400/70" : ""} title={hasDeviceVerification ? "Confirmed real Apple device" : "Device not confirmed"}>
+                        {hasDeviceVerification ? "\u2713" : "\u2013"} Device
+                      </span>
+                      <span className={hasFaceId ? "text-green-400/70" : ""} title={hasFaceId ? "Face ID confirmed" : "Face ID not confirmed"}>
+                        {hasFaceId ? "\u2713" : "\u2013"} Face ID
+                        {hasFaceId && attestationDoc?.biometricTimestamp && (
+                          <span className="text-gray-600 ml-1">{Math.round((attestationDoc.biometricTimestamp - attestationDoc.createdAt) / 1000)}s</span>
+                        )}
+                      </span>
+                    </div>
+                  </div>
+                </div>
 
-                  {/* Signing Key */}
-                  {result.publicKeyFingerprint && (
-                    <div className="px-5 py-3 bg-[#111111]">
-                      <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">Signing Key</div>
+                {/* Trust warnings */}
+                {trustStatus && (trustStatus.keyRevoked || trustStatus.credentialRevoked || trustStatus.appVersionTrusted === false) && (
+                  <div className="rounded-xl px-6 py-4 bg-orange-950/30 border border-orange-900/30">
+                    <div className="text-orange-400 text-sm font-medium mb-1">Trust warning</div>
+                    <div className="space-y-1 text-sm text-orange-300/80">
+                      {trustStatus.keyRevoked && (
+                        <p>Signing key has been revoked{trustStatus.keyRevocationReason ? `: ${trustStatus.keyRevocationReason}` : "."}</p>
+                      )}
+                      {trustStatus.credentialRevoked && (
+                        <p>Device credential has been revoked{trustStatus.credentialRevocationReason ? `: ${trustStatus.credentialRevocationReason}` : "."}</p>
+                      )}
+                      {trustStatus.appVersionTrusted === false && (
+                        <p>App version is no longer trusted{trustStatus.appVersionRevocationReason ? `: ${trustStatus.appVersionRevocationReason}` : "."}</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Technical details */}
+                <details className="group">
+                  <summary className="text-xs text-gray-600 hover:text-gray-400 cursor-pointer transition-colors flex items-center gap-1.5">
+                    <span className="group-open:rotate-90 transition-transform">{"\u25B6"}</span>
+                    Technical details
+                  </summary>
+                  <div className="mt-3 rounded-xl bg-[#111111] border border-gray-800/60 divide-y divide-gray-800/60 text-sm overflow-hidden">
+                    {/* Device */}
+                    <div className="px-5 py-3">
+                      <div className="text-xs text-gray-600 mb-0.5">Device</div>
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-gray-200 text-sm font-mono break-all">{result.publicKeyFingerprint}</span>
-                        {result.publicKey && knownKeyName ? (
-                          <span className="inline-flex items-center gap-1 text-sm text-green-400 font-medium">
-                            {knownKeyName}
-                            <button
-                              onClick={() => { removeKnownKey(result.publicKey!); setKnownKeyName(undefined); setKnownKeyVersion((v) => v + 1); }}
-                              className="text-gray-500 hover:text-red-400 text-xs ml-1"
-                              title="Forget this key"
-                            >x</button>
-                          </span>
-                        ) : result.publicKey && !savingKeyName ? (
-                          <button onClick={() => setSavingKeyName(true)} className="text-xs text-gray-500 hover:text-blue-400 transition-colors">
-                            Remember this key
-                          </button>
+                        <span className="text-gray-300 font-mono text-xs">{result.deviceId}</span>
+                        {attestationDoc?.deviceVerified ? (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-900/40 text-green-400 font-medium">Verified</span>
+                        ) : result?.appAttestPresent ? (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-900/40 text-yellow-400 font-medium">Unconfirmed</span>
                         ) : null}
                       </div>
-                      {savingKeyName && result.publicKey && (
-                        <div className="flex items-center gap-2 mt-2">
-                          <input
-                            type="text"
-                            className="bg-[#0a0a0a] border border-gray-700 rounded px-2 py-1 text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-gray-600"
-                            placeholder="Name this person..."
-                            value={keyNameInput}
-                            onChange={(e) => setKeyNameInput(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" && keyNameInput.trim()) {
-                                saveKnownKey(result.publicKey!, keyNameInput.trim());
-                                setKnownKeyName(keyNameInput.trim());
-                                setSavingKeyName(false);
-                                setKeyNameInput("");
-                                setKnownKeyVersion((v) => v + 1);
-                              } else if (e.key === "Escape") {
-                                setSavingKeyName(false);
-                                setKeyNameInput("");
-                              }
-                            }}
-                            autoFocus
-                          />
-                          <button
-                            onClick={() => { if (keyNameInput.trim()) { saveKnownKey(result.publicKey!, keyNameInput.trim()); setKnownKeyName(keyNameInput.trim()); setSavingKeyName(false); setKeyNameInput(""); setKnownKeyVersion((v) => v + 1); }}}
-                            disabled={!keyNameInput.trim()}
-                            className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-500 disabled:opacity-40 transition-colors"
-                          >Save</button>
-                          <button
-                            onClick={() => { setSavingKeyName(false); setKeyNameInput(""); }}
-                            className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
-                          >Cancel</button>
-                        </div>
-                      )}
                     </div>
-                  )}
-                </div>
 
-                {/* Keystroke Timeline */}
-                {hasKeystrokeData && (
-                  <KeystrokeTimeline timings={result.keystrokeTimings!} />
-                )}
-              </details>
+                    {/* Proof Chain */}
+                    {result.proofs && result.proofs.length > 0 && (
+                      <ProofChain proofs={result.proofs} />
+                    )}
+
+                    {/* Issuer DID */}
+                    {result.issuerDID && (
+                      <div className="px-5 py-3">
+                        <div className="text-xs text-gray-600 mb-0.5">Issuer</div>
+                        <div className="text-gray-400 text-xs font-mono break-all">{result.issuerDID}</div>
+                      </div>
+                    )}
+
+                    {/* Signing Key */}
+                    {result.publicKeyFingerprint && (
+                      <div className="px-5 py-3">
+                        <div className="text-xs text-gray-600 mb-0.5">Key</div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-gray-300 text-xs font-mono break-all">{result.publicKeyFingerprint}</span>
+                          {result.publicKey && knownKeyName ? (
+                            <span className="inline-flex items-center gap-1 text-xs text-green-400 font-medium">
+                              {knownKeyName}
+                              <button
+                                onClick={() => { removeKnownKey(result.publicKey!); setKnownKeyName(undefined); setKnownKeyVersion((v) => v + 1); }}
+                                className="text-gray-600 hover:text-red-400 text-[10px] ml-0.5"
+                                title="Forget this key"
+                              >{"\u00D7"}</button>
+                            </span>
+                          ) : result.publicKey && !savingKeyName ? (
+                            <button onClick={() => setSavingKeyName(true)} className="text-[10px] text-gray-600 hover:text-blue-400 transition-colors">
+                              Remember
+                            </button>
+                          ) : null}
+                        </div>
+                        {savingKeyName && result.publicKey && (
+                          <div className="flex items-center gap-2 mt-2">
+                            <input
+                              type="text"
+                              className="bg-[#0a0a0a] border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 placeholder-gray-600 focus:outline-none focus:border-gray-600"
+                              placeholder="Name this person..."
+                              value={keyNameInput}
+                              onChange={(e) => setKeyNameInput(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" && keyNameInput.trim()) {
+                                  saveKnownKey(result.publicKey!, keyNameInput.trim());
+                                  setKnownKeyName(keyNameInput.trim());
+                                  setSavingKeyName(false);
+                                  setKeyNameInput("");
+                                  setKnownKeyVersion((v) => v + 1);
+                                } else if (e.key === "Escape") {
+                                  setSavingKeyName(false);
+                                  setKeyNameInput("");
+                                }
+                              }}
+                              autoFocus
+                            />
+                            <button
+                              onClick={() => { if (keyNameInput.trim()) { saveKnownKey(result.publicKey!, keyNameInput.trim()); setKnownKeyName(keyNameInput.trim()); setSavingKeyName(false); setKeyNameInput(""); setKnownKeyVersion((v) => v + 1); }}}
+                              disabled={!keyNameInput.trim()}
+                              className="text-[10px] px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-500 disabled:opacity-40 transition-colors"
+                            >Save</button>
+                            <button
+                              onClick={() => { setSavingKeyName(false); setKeyNameInput(""); }}
+                              className="text-[10px] text-gray-600 hover:text-gray-300 transition-colors"
+                            >Cancel</button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Keystroke Timeline */}
+                    {hasKeystrokeData && (
+                      <KeystrokeTimeline timings={result.keystrokeTimings!} />
+                    )}
+                  </div>
+                </details>
+              </div>
             )}
           </div>
         )}
@@ -647,48 +619,23 @@ export default function Verify({ shortId }: { shortId?: string }) {
 
 function ProofChain({ proofs }: { proofs: ProofVerificationResult[] }) {
   return (
-    <div className="px-5 py-3 bg-[#111111]">
-      <div className="text-xs text-gray-500 uppercase tracking-wider mb-2">
-        Proof Chain
-      </div>
-      <div className="space-y-2">
+    <div className="px-5 py-3">
+      <div className="text-xs text-gray-600 mb-1.5">Proofs</div>
+      <div className="space-y-1.5">
         {proofs.map((proof, i) => (
-          <div key={i} className="flex items-center gap-3">
-            <div
-              className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
-                proof.valid
-                  ? "bg-green-900/50 text-green-400 border border-green-800"
-                  : "bg-red-900/50 text-red-400 border border-red-800"
-              }`}
-            >
-              {proofTypeIcon(proof.proofType, proof.valid)}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <span className={`text-sm font-medium ${proof.valid ? "text-green-400" : "text-red-400"}`}>
-                  {proofTypeLabel(proof.proofType)}
-                </span>
-                <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                  proof.valid
-                    ? "bg-green-900/50 text-green-400"
-                    : "bg-red-900/50 text-red-400"
-                }`}>
-                  {proof.valid ? "VALID" : "FAILED"}
-                </span>
-              </div>
-              {proof.error && (
-                <div className="text-xs text-red-400 mt-0.5">{proof.error}</div>
-              )}
-              {proof.details && (
-                <div className="text-xs text-gray-600 mt-0.5">
-                  {proof.details.created ? <span>{formatTimestamp(String(proof.details.created))}</span> : null}
-                  {proof.details.verifiedBy ? <span> (verified by {String(proof.details.verifiedBy)})</span> : null}
-                </div>
-              )}
-            </div>
-            {i < proofs.length - 1 && (
-              <div className="w-px h-4 bg-gray-700 ml-3" />
+          <div key={i} className="flex items-center gap-2 text-xs">
+            <span className={proof.valid ? "text-green-400" : "text-red-400"}>
+              {proof.valid ? "\u2713" : "\u2717"}
+            </span>
+            <span className={proof.valid ? "text-gray-300" : "text-red-400"}>
+              {proofTypeLabel(proof.proofType)}
+            </span>
+            {proof.error && (
+              <span className="text-red-400/60">{"\u2014"} {proof.error}</span>
             )}
+            {proof.details?.verifiedBy ? (
+              <span className="text-gray-600">({String(proof.details.verifiedBy)})</span>
+            ) : null}
           </div>
         ))}
       </div>

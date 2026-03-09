@@ -65,7 +65,7 @@ export default function HowItWorks() {
                 {
                   num: "6",
                   title: "Upload and share",
-                  desc: "The attestation is uploaded and you get a link like keywitness.io/v/abc123#key. Anyone with the link can verify it entirely in their browser.",
+                  desc: "The attestation is uploaded and you get a short link like typed.by/you/42 with the decryption key encoded as 27 emoji in the URL fragment. Anyone with the link can verify it entirely in their browser.",
                 },
               ]}
             />
@@ -141,6 +141,67 @@ export default function HowItWorks() {
   ]
 }`}
             </pre>
+          </Section>
+
+          <Section title="Emoji Key Encoding">
+            <p>
+              Each attestation's cleartext is encrypted with a random AES-256-GCM key.
+              The key is encoded as <strong>27 human emoji</strong> in the URL fragment
+              (the part after <code className="bg-[#1f2937] px-1.5 py-0.5 rounded text-green-400 text-xs">#</code>),
+              which is never sent to the server.
+            </p>
+            <p className="mt-2">
+              The encoding uses 129 emoji that support Fitzpatrick skin tone modifiers,
+              each with 6 variants (default + 5 skin tones) = 774 symbols.
+              At ~9.6 bits per emoji, 27 emoji encode the full 256-bit key.
+              The emoji survive copy-paste across messaging apps like iMessage, WhatsApp, and Slack.
+            </p>
+            <pre className="bg-[#111111] border border-gray-800 rounded-lg p-4 text-sm text-gray-300 overflow-x-auto mt-2">
+{`https://typed.by/magicseth/42#👵🏽🤳🤰🏾💁🏻🦹🏽✋🏾👂✋🏼🏊👨🏻💁🏽🧓🏼🧜🏼🫸🏽✍🧝🏼🏋🏼🤏🏻🚵🏿🧒🏻🏂🏿🤜🏻🚴🏻🫴🏽🖖🏽✊🏽`}
+            </pre>
+            <p className="mt-2">
+              If the emoji key is stripped (e.g. when a platform doesn't preserve the fragment),
+              the verification page shows the character count and lets recipients paste the
+              original text to verify the SHA-256 hash matches — a fallback that works without
+              the encryption key.
+            </p>
+          </Section>
+
+          <Section title="Usernames & Short Links">
+            <p>
+              Claim a username in the app to get short, human-readable attestation links.
+              Instead of <code className="bg-[#1f2937] px-1.5 py-0.5 rounded text-green-400 text-xs">keywitness.io/v/aBcDeFg123</code>,
+              your seals link to:
+            </p>
+            <pre className="bg-[#111111] border border-gray-800 rounded-lg p-4 text-sm text-gray-300 overflow-x-auto mt-2">
+{`typed.by/magicseth/1
+typed.by/magicseth/2
+typed.by/magicseth/3`}
+            </pre>
+            <p className="mt-2">
+              Usernames are bound to your device's Ed25519 public key — no password, no
+              login. You provide a recovery email during registration, used only if you
+              lose access to all your devices. Multiple devices can be authorized under
+              the same username via key rotation.
+            </p>
+          </Section>
+
+          <Section title="Paste to Verify">
+            <p>
+              When the encryption key isn't available (the link was shared without the
+              emoji fragment), the verification page shows that text was sealed but can't
+              decrypt it. Recipients can paste the original text to verify it matches:
+            </p>
+            <ul className="list-disc list-inside space-y-1 ml-1 mt-2">
+              <li>The page shows how many characters were typed</li>
+              <li>The recipient pastes the text they received alongside the link</li>
+              <li>The SHA-256 hash of the pasted text is compared to the attestation's <code className="bg-[#1f2937] px-1.5 py-0.5 rounded text-green-400 text-xs">cleartextHash</code></li>
+              <li>A match proves the pasted text is exactly what was sealed — no modification</li>
+            </ul>
+            <p className="mt-2">
+              The seal URL itself is automatically stripped from the pasted text before
+              hashing, so copy-pasting the full message (including the link) works correctly.
+            </p>
           </Section>
 
           <Section title="Zero-Knowledge Server">

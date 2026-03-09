@@ -180,7 +180,7 @@ async function sha256Base64URL(text) {
 
 // Extract the cleartext (text without the seal link)
 function extractCleartext(text, match) {
-  return text.replace(match[0], '').replace(/\s+$/, '');
+  return text.slice(0, text.indexOf(match[0])).replace(/\s+$/, '');
 }
 
 async function handleResult(result, match) {
@@ -288,7 +288,7 @@ textarea.addEventListener('input', () =&gt; {
   }
 
   function extractCleartext(text, match) {
-    return text.replace(match[0], '').replace(/\s+$/, '');
+    return text.slice(0, text.indexOf(match[0])).replace(/\s+$/, '');
   }
 
   function showChecks(result) {
@@ -349,6 +349,85 @@ textarea.addEventListener('input', () =&gt; {
   submitBtn.addEventListener('click', function() {
     if (!submitBtn.disabled) {
       alert('Comment submitted with verified seal!');
+    }
+  });
+})();
+</script>
+
+<h2>Example: Require KeyWitness Keyboard</h2>
+<p>Add <code>data-keywitness-required</code> to any textarea to detect the KeyWitness keyboard. Users typing with a regular keyboard see an install prompt. When the KeyWitness keyboard is detected, the prompt updates automatically.</p>
+
+<div class="badge-demo">
+  <label style="display: block; color: #d1d5db; font-weight: 600; margin-bottom: 8px;">Write a verified message</label>
+  <textarea id="demo-required" placeholder="Start typing to see keyboard detection..." style="width: 100%; min-height: 80px; background: #0a0a0a; border: 1px solid #374151; border-radius: 8px; padding: 12px; color: #e5e7eb; font-size: 14px; resize: vertical; box-sizing: border-box;"></textarea>
+  <div id="demo-required-status" style="margin: 8px 0; min-height: 20px; font-size: 13px;"></div>
+</div>
+
+<h3>Zero-code (HTML attribute)</h3>
+<pre><code>&lt;script src="https://keywitness.io/embed.js"&gt;&lt;/script&gt;
+
+&lt;!-- The SDK auto-detects the attribute and shows install prompts --&gt;
+&lt;textarea data-keywitness-required placeholder="Type here..."&gt;&lt;/textarea&gt;</code></pre>
+
+<h3>JavaScript API</h3>
+<pre><code>&lt;script src="https://keywitness.io/embed.js"&gt;&lt;/script&gt;
+
+&lt;script&gt;
+KeyWitness.require('#my-textarea', {
+  onDetected() {
+    // KeyWitness keyboard is active
+    document.getElementById('status').textContent = '✓ KeyWitness keyboard detected';
+  },
+  onMissing() {
+    // Regular keyboard — prompt to install
+    document.getElementById('status').innerHTML =
+      '⚠ This field requires the &lt;a href="https://keywitness.io"&gt;KeyWitness keyboard&lt;/a&gt;';
+  },
+});
+&lt;/script&gt;</code></pre>
+
+<p>How it works: the KeyWitness keyboard emits an invisible two-character signal (U+200E U+200F) on the first keystroke, then immediately deletes it. The SDK catches the signal via the <code>input</code> event. No visible trace is left in the text.</p>
+
+<script>
+(function() {
+  var textarea = document.getElementById('demo-required');
+  var statusEl = document.getElementById('demo-required-status');
+  var detected = false;
+  var stopWatching = null;
+  var SIGNAL = '\u200E\u200F';
+
+  function showChecks(result) {
+    var checks = [
+      { ok: result.valid, label: 'Signature' },
+      { ok: result.deviceVerified, label: 'Real device' },
+      { ok: result.biometricVerified, label: 'Face ID' },
+    ];
+    statusEl.innerHTML = '<span style="color: #22c55e; margin-right: 12px; font-size: 13px">&#x2713; KeyWitness keyboard</span>'
+      + checks.map(function(c) {
+        return '<span style="margin-right: 12px; font-size: 13px; color: '
+          + (c.ok ? '#22c55e' : '#6b7280') + '">'
+          + (c.ok ? '&#x2713;' : '&ndash;') + ' ' + c.label + '</span>';
+      }).join('');
+  }
+
+  textarea.addEventListener('input', function() {
+    // Detect keyboard signal
+    if (!detected && textarea.value.indexOf(SIGNAL) !== -1) {
+      detected = true;
+      statusEl.innerHTML = '<span style="color: #22c55e; font-size: 13px">&#x2713; KeyWitness keyboard detected &mdash; tap Seal when done</span>';
+    } else if (!detected && textarea.value.length > 0) {
+      statusEl.innerHTML = '<span style="color: #f59e0b; font-size: 13px">&#x26A0; This field requires the <a href="https://keywitness.io" target="_blank" rel="noopener" style="color: #3b82f6; text-decoration: underline">KeyWitness keyboard</a></span>';
+    }
+
+    // Detect seal link and start polling
+    var match = textarea.value.match(/(?:https?:\/\/)?keywitness\.io\/v\/([A-Za-z0-9]+)(?:#[A-Za-z0-9_-]+)?/);
+    if (match && !stopWatching) {
+      var shortId = match[1];
+      stopWatching = KeyWitness.watchById(shortId, function(result) {
+        if (result.valid) {
+          showChecks(result);
+        }
+      });
     }
   });
 })();

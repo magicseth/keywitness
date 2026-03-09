@@ -17,6 +17,7 @@ import type * as lib_vc from "../lib/vc.js";
 import type * as lib_verify from "../lib/verify.js";
 import type * as selfHosting from "../selfHosting.js";
 import type * as trust from "../trust.js";
+import type * as usernames from "../usernames.js";
 
 import type {
   ApiFromModules,
@@ -34,6 +35,7 @@ declare const fullApi: ApiFromModules<{
   "lib/verify": typeof lib_verify;
   selfHosting: typeof selfHosting;
   trust: typeof trust;
+  usernames: typeof usernames;
 }>;
 
 /**
