@@ -4,23 +4,26 @@ import nacl from "tweetnacl";
 
 export interface Attestation {
   version: string;
-  cleartext: string;
+  cleartext?: string;           // v1 only
+  cleartextHash?: string;       // v2: base64url SHA-256 of cleartext
+  encryptedCleartext?: string;  // v2: base64url AES-GCM ciphertext (nonce||ct||tag) — contains cleartext + keystrokeTimings
   deviceId: string;
   faceIdVerified?: boolean;
   timestamp: string;
   publicKey: string; // base64url-encoded Ed25519 public key
   signature: string; // base64url-encoded Ed25519 signature
   keystrokeBiometricsHash?: string;
-  keystrokeTimings?: Array<{
-    key: string;
-    downAt: number;
-    upAt: number;
-    x?: number;
-    y?: number;
-    force?: number;
-    radius?: number;
-  }>;
   appAttestToken?: string;
+}
+
+export interface KeystrokeTiming {
+  key: string;
+  downAt: number;
+  upAt: number;
+  x?: number;
+  y?: number;
+  force?: number;
+  radius?: number;
 }
 
 export interface VerificationResult {
@@ -32,16 +35,10 @@ export interface VerificationResult {
   publicKey?: string;
   publicKeyFingerprint?: string;
   keystrokeBiometricsHash?: string;
-  keystrokeTimings?: Array<{
-    key: string;
-    downAt: number;
-    upAt: number;
-    x?: number;
-    y?: number;
-    force?: number;
-    radius?: number;
-  }>;
+  keystrokeTimings?: KeystrokeTiming[];
   error?: string;
+  encrypted?: boolean;       // true for v2
+  decryptionFailed?: boolean; // true if key missing/wrong
 }
 
 // ── Base64url helpers ────────────────────────────────────────────────────────
@@ -57,6 +54,33 @@ function base64urlDecode(input: string): Uint8Array {
     bytes[i] = binaryString.charCodeAt(i);
   }
   return bytes;
+}
+
+function base64urlEncode(bytes: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function decryptAESGCM(ciphertextB64: string, keyB64: string): Promise<string> {
+  const ciphertextBytes = base64urlDecode(ciphertextB64);
+  const keyBytes = base64urlDecode(keyB64);
+  const nonce = ciphertextBytes.slice(0, 12);
+  const rest = ciphertextBytes.slice(12);
+  const key = await crypto.subtle.importKey("raw", keyBytes, "AES-GCM", false, ["decrypt"]);
+  const decrypted = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: nonce, tagLength: 128 },
+    key,
+    rest,
+  );
+  return new TextDecoder().decode(decrypted);
+}
+
+async function sha256Base64url(data: Uint8Array): Promise<string> {
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return base64urlEncode(new Uint8Array(hash));
 }
 
 function bytesToHex(bytes: Uint8Array): string {
@@ -82,13 +106,21 @@ async function computeFingerprint(publicKeyBytes: Uint8Array): Promise<string> {
 // ── Canonical payload reconstruction ─────────────────────────────────────────
 
 function buildCanonicalPayload(attestation: Attestation): string {
+  const isV2 = attestation.cleartextHash !== undefined && attestation.cleartext === undefined;
   const payload: Record<string, unknown> = {
-    cleartext: attestation.cleartext,
+    ...(isV2
+      ? { cleartextHash: attestation.cleartextHash }
+      : { cleartext: attestation.cleartext }),
     deviceId: attestation.deviceId,
     keystrokeBiometricsHash: attestation.keystrokeBiometricsHash ?? "",
     timestamp: attestation.timestamp,
     version: attestation.version,
   };
+
+  // v2: encryptedCleartext is signed so the ciphertext cannot be swapped
+  if (isV2 && attestation.encryptedCleartext) {
+    payload.encryptedCleartext = attestation.encryptedCleartext;
+  }
 
   if (attestation.faceIdVerified !== undefined) {
     payload.faceIdVerified = attestation.faceIdVerified;
@@ -149,14 +181,17 @@ function parseAttestationBlock(raw: string): Attestation {
     throw new Error("Attestation body is not valid JSON.");
   }
 
-  const required: (keyof Attestation)[] = [
+  const baseRequired: (keyof Attestation)[] = [
     "version",
-    "cleartext",
     "deviceId",
     "timestamp",
     "publicKey",
     "signature",
   ];
+  const isV2 = attestation.cleartextHash !== undefined;
+  const required: (keyof Attestation)[] = isV2
+    ? [...baseRequired, "cleartextHash"]
+    : [...baseRequired, "cleartext"];
   for (const field of required) {
     if (attestation[field] === undefined || attestation[field] === null) {
       throw new Error(`Attestation is missing required field: ${field}`);
@@ -170,9 +205,12 @@ function parseAttestationBlock(raw: string): Attestation {
 
 export async function verifyAttestation(
   rawInput: string,
+  encryptionKey?: string,
+  manualCleartext?: string,
 ): Promise<VerificationResult> {
   try {
     const attestation = parseAttestationBlock(rawInput.trim());
+    const isV2 = attestation.cleartextHash !== undefined && attestation.cleartext === undefined;
 
     let publicKeyBytes: Uint8Array;
     let signatureBytes: Uint8Array;
@@ -209,16 +247,50 @@ export async function verifyAttestation(
 
     const fingerprint = await computeFingerprint(publicKeyBytes);
 
+    let cleartext: string | undefined = attestation.cleartext;
+    let keystrokeTimings: KeystrokeTiming[] | undefined;
+    let decryptionFailed = false;
+
+    if (isV2) {
+      if (encryptionKey && attestation.encryptedCleartext) {
+        try {
+          const decryptedJSON = await decryptAESGCM(attestation.encryptedCleartext, encryptionKey);
+          // Inner payload contains { cleartext, keystrokeTimings }
+          const inner = JSON.parse(decryptedJSON);
+          const decryptedCleartext: string = inner.cleartext;
+          const hash = await sha256Base64url(new TextEncoder().encode(decryptedCleartext));
+          if (hash === attestation.cleartextHash) {
+            cleartext = decryptedCleartext;
+            keystrokeTimings = inner.keystrokeTimings;
+          } else {
+            decryptionFailed = true;
+          }
+        } catch {
+          decryptionFailed = true;
+        }
+      } else if (manualCleartext) {
+        const hash = await sha256Base64url(new TextEncoder().encode(manualCleartext));
+        if (hash === attestation.cleartextHash) {
+          cleartext = manualCleartext;
+          // keystrokeTimings unavailable without encryption key
+        } else {
+          decryptionFailed = true;
+        }
+      }
+    }
+
     return {
       valid,
-      cleartext: attestation.cleartext,
+      cleartext,
       deviceId: attestation.deviceId,
       faceIdVerified: attestation.faceIdVerified,
       timestamp: attestation.timestamp,
       publicKey: attestation.publicKey,
       publicKeyFingerprint: fingerprint,
       keystrokeBiometricsHash: attestation.keystrokeBiometricsHash,
-      keystrokeTimings: attestation.keystrokeTimings,
+      keystrokeTimings,
+      encrypted: isV2 ? true : undefined,
+      decryptionFailed: decryptionFailed ? true : undefined,
       error: valid
         ? undefined
         : "Signature verification failed. The content may have been tampered with.",

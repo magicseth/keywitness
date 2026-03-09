@@ -1,7 +1,41 @@
 import { useState, useEffect, useCallback } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
-import { verifyAttestation, VerificationResult } from "../lib/verify";
+import { verifyAttestation, VerificationResult, KeystrokeTiming } from "../lib/verify";
+
+// ── Known keys localStorage helpers ─────────────────────────────────────────
+
+interface KnownKeyEntry {
+  name: string;
+  savedAt: number;
+}
+
+const KNOWN_KEYS_STORAGE_KEY = "keywitness-known-keys";
+
+function getKnownKeys(): Record<string, KnownKeyEntry> {
+  try {
+    const raw = localStorage.getItem(KNOWN_KEYS_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function getKnownKey(publicKey: string): KnownKeyEntry | undefined {
+  return getKnownKeys()[publicKey];
+}
+
+function saveKnownKey(publicKey: string, name: string): void {
+  const keys = getKnownKeys();
+  keys[publicKey] = { name, savedAt: Date.now() };
+  localStorage.setItem(KNOWN_KEYS_STORAGE_KEY, JSON.stringify(keys));
+}
+
+function removeKnownKey(publicKey: string): void {
+  const keys = getKnownKeys();
+  delete keys[publicKey];
+  localStorage.setItem(KNOWN_KEYS_STORAGE_KEY, JSON.stringify(keys));
+}
 
 function formatTimestamp(iso: string): string {
   try {
@@ -26,6 +60,14 @@ export default function Verify({ shortId }: { shortId?: string }) {
   const [input, setInput] = useState("");
   const [result, setResult] = useState<VerificationResult | null>(null);
   const [verifying, setVerifying] = useState(false);
+  const [manualCleartext, setManualCleartext] = useState("");
+  const [knownKeyName, setKnownKeyName] = useState<string | undefined>(undefined);
+  const [savingKeyName, setSavingKeyName] = useState(false);
+  const [keyNameInput, setKeyNameInput] = useState("");
+  const [, setKnownKeyVersion] = useState(0); // force re-render on known key changes
+
+  // Read encryption key from URL fragment
+  const encryptionKey = window.location.hash.slice(1) || undefined;
 
   // Also check for ?a= query param
   const params = new URLSearchParams(window.location.search);
@@ -43,17 +85,21 @@ export default function Verify({ shortId }: { shortId?: string }) {
   );
 
   const handleVerify = useCallback(
-    async (text: string) => {
+    async (text: string, manualText?: string) => {
       if (!text.trim()) return;
       setVerifying(true);
       try {
-        const res = await verifyAttestation(text);
+        const res = await verifyAttestation(text, encryptionKey, manualText);
         setResult(res);
+        if (res.publicKey) {
+          const known = getKnownKey(res.publicKey);
+          setKnownKeyName(known?.name);
+        }
       } finally {
         setVerifying(false);
       }
     },
-    [],
+    [encryptionKey],
   );
 
   // Auto-load attestation from Convex when fetched
@@ -66,7 +112,7 @@ export default function Verify({ shortId }: { shortId?: string }) {
 
   const onVerifyClick = () => handleVerify(input);
 
-  const isError = result && !result.valid && !result.cleartext;
+  const isError = result && !result.valid && !result.cleartext && !result.encrypted;
   const status = result
     ? result.valid
       ? "verified"
@@ -167,7 +213,51 @@ export default function Verify({ shortId }: { shortId?: string }) {
             {/* Detail fields */}
             {!isError && (
               <div className="divide-y divide-gray-800">
-                <Field label="Cleartext" value={result.cleartext} />
+                {/* Cleartext display */}
+                {result.cleartext ? (
+                  <div className="px-5 py-3 bg-[#111111]">
+                    <div className="text-xs text-gray-500 uppercase tracking-wider mb-1 flex items-center gap-2">
+                      Cleartext
+                      {result.encrypted && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/50 text-blue-400 font-medium uppercase">
+                          Encrypted
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-gray-200 text-sm break-all">
+                      {result.cleartext}
+                    </div>
+                  </div>
+                ) : result.encrypted && !result.cleartext ? (
+                  <div className="px-5 py-3 bg-[#111111]">
+                    <div className="text-xs text-gray-500 uppercase tracking-wider mb-1 flex items-center gap-2">
+                      Cleartext
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/50 text-blue-400 font-medium uppercase">
+                        Encrypted
+                      </span>
+                    </div>
+                    <div className="text-gray-500 text-sm italic mb-3">
+                      {result.decryptionFailed
+                        ? "Decryption failed — wrong key or corrupted data."
+                        : "Cleartext is encrypted. Provide the decryption key in the URL fragment or paste the original text below."}
+                    </div>
+                    <textarea
+                      className="w-full h-24 bg-[#0a0a0a] border border-gray-700 rounded-lg p-3 font-mono text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-gray-600 focus:ring-1 focus:ring-gray-600 resize-y mb-2"
+                      placeholder="Paste the original cleartext here to verify it matches..."
+                      value={manualCleartext}
+                      onChange={(e) => setManualCleartext(e.target.value)}
+                    />
+                    <button
+                      onClick={() => handleVerify(input, manualCleartext)}
+                      disabled={verifying || !manualCleartext.trim()}
+                      className="px-4 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    >
+                      Verify with cleartext
+                    </button>
+                  </div>
+                ) : (
+                  <Field label="Cleartext" value={result.cleartext} />
+                )}
                 <Field
                   label="Device ID"
                   value={result.deviceId}
@@ -191,11 +281,90 @@ export default function Verify({ shortId }: { shortId?: string }) {
                       : undefined
                   }
                 />
-                <Field
-                  label="Public Key Fingerprint"
-                  value={result.publicKeyFingerprint}
-                  mono
-                />
+                {/* Public Key Fingerprint with known key support */}
+                {result.publicKeyFingerprint && (
+                  <div className="px-5 py-3 bg-[#111111]">
+                    <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">
+                      Public Key Fingerprint
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-gray-200 text-sm font-mono break-all">
+                        {result.publicKeyFingerprint}
+                      </span>
+                      {result.publicKey && knownKeyName ? (
+                        <span className="inline-flex items-center gap-1 text-sm text-green-400 font-medium">
+                          Known as: {knownKeyName}
+                          <button
+                            onClick={() => {
+                              removeKnownKey(result.publicKey!);
+                              setKnownKeyName(undefined);
+                              setKnownKeyVersion((v) => v + 1);
+                            }}
+                            className="text-gray-500 hover:text-red-400 text-xs ml-1"
+                            title="Remove known key"
+                          >
+                            x
+                          </button>
+                        </span>
+                      ) : result.publicKey && !savingKeyName ? (
+                        <button
+                          onClick={() => setSavingKeyName(true)}
+                          className="text-xs text-gray-500 hover:text-blue-400 transition-colors"
+                        >
+                          Save as known
+                        </button>
+                      ) : null}
+                    </div>
+                    {savingKeyName && result.publicKey && (
+                      <div className="flex items-center gap-2 mt-2">
+                        <input
+                          type="text"
+                          className="bg-[#0a0a0a] border border-gray-700 rounded px-2 py-1 text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-gray-600"
+                          placeholder="Enter a name..."
+                          value={keyNameInput}
+                          onChange={(e) => setKeyNameInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && keyNameInput.trim()) {
+                              saveKnownKey(result.publicKey!, keyNameInput.trim());
+                              setKnownKeyName(keyNameInput.trim());
+                              setSavingKeyName(false);
+                              setKeyNameInput("");
+                              setKnownKeyVersion((v) => v + 1);
+                            } else if (e.key === "Escape") {
+                              setSavingKeyName(false);
+                              setKeyNameInput("");
+                            }
+                          }}
+                          autoFocus
+                        />
+                        <button
+                          onClick={() => {
+                            if (keyNameInput.trim()) {
+                              saveKnownKey(result.publicKey!, keyNameInput.trim());
+                              setKnownKeyName(keyNameInput.trim());
+                              setSavingKeyName(false);
+                              setKeyNameInput("");
+                              setKnownKeyVersion((v) => v + 1);
+                            }
+                          }}
+                          disabled={!keyNameInput.trim()}
+                          className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-500 disabled:opacity-40 transition-colors"
+                        >
+                          Save
+                        </button>
+                        <button
+                          onClick={() => {
+                            setSavingKeyName(false);
+                            setKeyNameInput("");
+                          }}
+                          className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
                 {result.publicKey && (
                   <div className="px-5 py-3 bg-[#111111]">
                     <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">
@@ -258,6 +427,10 @@ export default function Verify({ shortId }: { shortId?: string }) {
                 <li>
                   The attestation was created at the indicated timestamp
                 </li>
+                <li>
+                  The server never has access to the cleartext — only the
+                  encrypted form is stored
+                </li>
               </ul>
             </div>
             <div>
@@ -278,9 +451,16 @@ export default function Verify({ shortId }: { shortId?: string }) {
         </div>
 
         {/* Footer */}
-        <footer className="text-center text-gray-600 text-xs py-6 border-t border-gray-800">
-          All verification is performed client-side in your browser. No
-          attestation data is sent to any server.
+        <footer className="text-center text-gray-600 text-xs py-6 border-t border-gray-800 space-y-2">
+          <div>
+            All verification is performed client-side in your browser. No
+            attestation data is sent to any server.
+          </div>
+          <div>
+            <a href="/how" className="text-gray-500 hover:text-gray-300 transition-colors">
+              How does KeyWitness work?
+            </a>
+          </div>
         </footer>
       </div>
     </div>
@@ -314,7 +494,7 @@ function Field({
 function KeystrokeTimeline({
   timings,
 }: {
-  timings: Array<{ key: string; downAt: number; upAt: number; x?: number; y?: number; force?: number; radius?: number }>;
+  timings: KeystrokeTiming[];
 }) {
   const totalDuration = Math.max(...timings.map((t) => t.upAt));
   const maxBarWidth = 300;
@@ -375,12 +555,18 @@ function KeystrokeTimeline({
       {hasBiometrics && (
         <div className="mt-4 border-t border-gray-800 pt-3">
           <div className="text-xs text-gray-500 uppercase tracking-wider mb-2">
-            Touch Positions
+            Touch Biometrics
           </div>
           <div className="flex flex-wrap gap-1">
             {timings.map((t, i) => {
               const displayKey = t.key === " " ? "\u2423" : t.key;
-              const forceOpacity = t.force ? Math.min(0.3 + t.force * 0.7, 1) : 0.5;
+              // Use radius for opacity (varies with finger contact area), fallback to force
+              const maxRadius = Math.max(...timings.map((tt) => tt.radius ?? 0), 1);
+              const radiusNorm = (t.radius ?? 0) / maxRadius;
+              const opacity = Math.max(0.25, radiusNorm);
+              // Offset dot within tile based on x/y position on key (normalized to ~0-40px key area)
+              const dotX = t.x !== undefined ? Math.min(Math.max(t.x / 2, 2), 22) : 12;
+              const dotY = t.y !== undefined ? Math.min(Math.max(t.y / 2, 2), 22) : 12;
               return (
                 <div
                   key={i}
@@ -388,17 +574,21 @@ function KeystrokeTimeline({
                   style={{
                     width: 28,
                     height: 28,
-                    backgroundColor: `rgba(59, 130, 246, ${forceOpacity})`,
+                    backgroundColor: `rgba(59, 130, 246, ${opacity})`,
                   }}
                   title={`x:${t.x?.toFixed(1)} y:${t.y?.toFixed(1)} force:${t.force?.toFixed(3)} radius:${t.radius?.toFixed(1)}`}
                 >
                   {displayKey}
+                  <div
+                    className="absolute w-1.5 h-1.5 rounded-full bg-white/60"
+                    style={{ left: `${dotX}px`, top: `${dotY}px` }}
+                  />
                 </div>
               );
             })}
           </div>
           <p className="text-[10px] text-gray-600 mt-1">
-            Opacity = touch force. Hover for x/y/force/radius details.
+            Dot = touch position on key. Opacity = contact radius. Hover for details.
           </p>
         </div>
       )}

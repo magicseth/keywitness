@@ -32,17 +32,27 @@ struct KeystrokeTiming: Codable {
     let radius: CGFloat       // finger contact radius
 }
 
+// MARK: - Encrypted Inner Payload
+
+/// The inner payload that gets AES-GCM encrypted.
+/// Contains cleartext and keystroke timings so they are never exposed in plaintext.
+struct EncryptedInnerPayload: Codable {
+    let cleartext: String
+    let keystrokeTimings: [KeystrokeTiming]
+}
+
 // MARK: - Attestation Payload
 
 /// The full attestation payload matching the KeyWitness protocol.
+/// keystrokeTimings are inside encryptedCleartext, never in the outer envelope.
 struct Attestation: Codable {
     let version: String
-    let cleartext: String
+    let cleartextHash: String
+    let encryptedCleartext: String
     let deviceId: String
     let faceIdVerified: Bool
     let timestamp: String
     let keystrokeBiometricsHash: String
-    let keystrokeTimings: [KeystrokeTiming]
     let signature: String
     let publicKey: String
 }
@@ -51,15 +61,15 @@ struct Attestation: Codable {
 
 final class AttestationBuilder {
 
-    static let protocolVersion = "keywitness-v1"
+    static let protocolVersion = "keywitness-v2"
 
     // MARK: - Public API
 
     /// Creates a full attestation for the given cleartext and keystroke events.
-    /// Returns the PEM-style attestation text block ready for insertion.
+    /// Returns a tuple of (block: PEM-style attestation text, encryptionKey: base64url AES key).
     static func createAttestation(cleartext: String,
                                   keystrokeEvents: [KeystrokeEvent],
-                                  faceIdVerified: Bool) throws -> String {
+                                  faceIdVerified: Bool) throws -> (block: String, encryptionKey: String) {
 
         let deviceId = deviceIdentifier()
         let timestamp = iso8601Timestamp()
@@ -67,10 +77,28 @@ final class AttestationBuilder {
         let publicKey = try CryptoEngine.publicKeyBase64URL()
         let timings = buildKeystrokeTimings(keystrokeEvents)
 
-        // Build the canonical signing payload (does NOT include keystrokeTimings)
+        // Generate AES-256 key for client-side encryption
+        let aesKey = CryptoEngine.generateAESKey()
+
+        // Compute cleartext hash
+        let cleartextHash = CryptoEngine.sha256Base64URL(Data(cleartext.utf8))
+
+        // Build inner payload containing cleartext + keystroke timings
+        let innerPayload = EncryptedInnerPayload(cleartext: cleartext, keystrokeTimings: timings)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let innerJSON = try encoder.encode(innerPayload)
+
+        // Encrypt inner payload (cleartext + timings) with AES-GCM
+        let encryptedData = try CryptoEngine.encryptAESGCM(plaintext: innerJSON, key: aesKey)
+        let encryptedCleartext = CryptoEngine.base64URLEncode(encryptedData)
+
+        // Build the canonical signing payload — includes encryptedCleartext so
+        // the ciphertext cannot be swapped without invalidating the signature
         let signingPayload = canonicalSigningPayload(
             version: protocolVersion,
-            cleartext: cleartext,
+            cleartextHash: cleartextHash,
+            encryptedCleartext: encryptedCleartext,
             deviceId: deviceId,
             faceIdVerified: faceIdVerified,
             timestamp: timestamp,
@@ -85,17 +113,19 @@ final class AttestationBuilder {
 
         let attestation = Attestation(
             version: protocolVersion,
-            cleartext: cleartext,
+            cleartextHash: cleartextHash,
+            encryptedCleartext: encryptedCleartext,
             deviceId: deviceId,
             faceIdVerified: faceIdVerified,
             timestamp: timestamp,
             keystrokeBiometricsHash: biometricsHash,
-            keystrokeTimings: timings,
             signature: signature,
             publicKey: publicKey
         )
 
-        return try formatAttestationBlock(attestation)
+        let block = try formatAttestationBlock(attestation)
+        let encryptionKey = CryptoEngine.aesKeyBase64URL(aesKey)
+        return (block: block, encryptionKey: encryptionKey)
     }
 
     // MARK: - Canonical Signing Payload
@@ -103,16 +133,18 @@ final class AttestationBuilder {
     /// Builds the canonical JSON signing payload with sorted keys and no whitespace.
     /// This is the exact byte string that gets signed.
     static func canonicalSigningPayload(version: String,
-                                        cleartext: String,
+                                        cleartextHash: String,
+                                        encryptedCleartext: String,
                                         deviceId: String,
                                         faceIdVerified: Bool,
                                         timestamp: String,
                                         keystrokeBiometricsHash: String) -> String {
         // Manually construct sorted-key JSON to guarantee deterministic output.
-        // Keys in alphabetical order: cleartext, deviceId, faceIdVerified, keystrokeBiometricsHash, timestamp, version
+        // Keys in alphabetical order: cleartextHash, deviceId, encryptedCleartext, faceIdVerified, keystrokeBiometricsHash, timestamp, version
         return "{"
-            + "\"\(jsonEscape("cleartext"))\":\"\(jsonEscape(cleartext))\","
+            + "\"\(jsonEscape("cleartextHash"))\":\"\(jsonEscape(cleartextHash))\","
             + "\"\(jsonEscape("deviceId"))\":\"\(jsonEscape(deviceId))\","
+            + "\"\(jsonEscape("encryptedCleartext"))\":\"\(jsonEscape(encryptedCleartext))\","
             + "\"faceIdVerified\":\(faceIdVerified),"
             + "\"\(jsonEscape("keystrokeBiometricsHash"))\":\"\(jsonEscape(keystrokeBiometricsHash))\","
             + "\"\(jsonEscape("timestamp"))\":\"\(jsonEscape(timestamp))\","

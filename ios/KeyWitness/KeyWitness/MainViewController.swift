@@ -1,5 +1,6 @@
 import UIKit
 import LocalAuthentication
+import UserNotifications
 
 /// Container app main screen. Shows setup instructions, the device public key,
 /// and a test text field to try the KeyWitness keyboard.
@@ -35,9 +36,14 @@ class MainViewController: UIViewController {
         setupUI()
         loadPublicKey()
         promptFaceId()
+        requestNotificationPermission()
 
         NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillShow(_:)), name: UIResponder.keyboardWillShowNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillHide(_:)), name: UIResponder.keyboardWillHideNotification, object: nil)
+    }
+
+    private func requestNotificationPermission() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -58,9 +64,11 @@ class MainViewController: UIViewController {
                                localizedReason: "Verify your identity for KeyWitness attestations") { [weak self] success, _ in
             DispatchQueue.main.async {
                 if success {
-                    // Write verification timestamp to App Group so keyboard can read it
                     let defaults = UserDefaults(suiteName: "group.io.keywitness")
+                    // Session timestamp for keyboard unlock (10 min)
                     defaults?.set(Date(), forKey: "faceIdVerifiedAt")
+                    // Attest token with timestamp — keyboard enforces 2-min expiry
+                    defaults?.set(Date(), forKey: "attestTokenCreatedAt")
                 }
                 self?.updateFaceIdStatus(verified: success)
             }
@@ -68,9 +76,11 @@ class MainViewController: UIViewController {
     }
 
     private func updateFaceIdStatus(verified: Bool) {
+        let biometricType = LAContext().biometryType
+        let name = biometricType == .touchID ? "Touch ID" : "Face ID"
         faceIdStatusLabel.text = verified
-            ? "Face ID: Verified (valid for 10 min)"
-            : "Face ID: Not verified"
+            ? "\(name): Verified (keyboard unlock: 10 min, attest: 2 min)"
+            : "\(name): Not verified"
         faceIdStatusLabel.textColor = verified ? .systemGreen : .systemRed
     }
 
@@ -199,8 +209,11 @@ class MainViewController: UIViewController {
         card.translatesAutoresizingMaskIntoConstraints = false
         contentStack.addArrangedSubview(card)
 
+        let biometricType = LAContext().biometryType
+        let biometricName = biometricType == .touchID ? "Touch ID" : "Face ID"
+
         let header = UILabel()
-        header.text = "Face ID"
+        header.text = biometricName
         header.font = UIFont.systemFont(ofSize: 20, weight: .semibold)
         header.textColor = .white
 
@@ -209,12 +222,12 @@ class MainViewController: UIViewController {
         faceIdStatusLabel.textColor = .lightGray
 
         let reverifyButton = UIButton(type: .system)
-        reverifyButton.setTitle("Re-verify Face ID", for: .normal)
+        reverifyButton.setTitle("Re-verify \(biometricName)", for: .normal)
         reverifyButton.tintColor = accentColor
         reverifyButton.addTarget(self, action: #selector(reverifyFaceId), for: .touchUpInside)
 
         let desc = UILabel()
-        desc.text = "Face ID verification is included in attestations. Valid for 10 minutes."
+        desc.text = "\(biometricName) unlocks the keyboard (10 min) and is required for attestation (2 min)."
         desc.font = UIFont.systemFont(ofSize: 13)
         desc.textColor = .lightGray
         desc.numberOfLines = 0
@@ -356,13 +369,40 @@ class MainViewController: UIViewController {
             return
         }
 
-        let deviceName = UIDevice.current.name
-        let url = URL(string: "https://quick-curlew-492.convex.site/api/keys/register")!
+        // Show alert to let user set a display name
+        let alert = UIAlertController(title: "Register Public Key", message: "Choose a display name that others will see when verifying your attestations.", preferredStyle: .alert)
+        alert.addTextField { textField in
+            textField.placeholder = "Display name"
+            textField.text = UIDevice.current.name
+            textField.autocapitalizationType = .words
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Register", style: .default) { [weak self] _ in
+            guard let self = self else { return }
+            let displayName = alert.textFields?.first?.text?.trimmingCharacters(in: .whitespaces) ?? UIDevice.current.name
+            self.doRegister(publicKey: key, name: displayName.isEmpty ? UIDevice.current.name : displayName)
+        })
+        present(alert, animated: true)
+    }
+
+    private func doRegister(publicKey: String, name: String) {
+        // Sign a challenge to prove we own the private key
+        let signature: String
+        do {
+            let result = try CryptoEngine.signRegistrationChallenge(name: name)
+            signature = result.signature
+        } catch {
+            registerKeyButton.setTitle("Sign failed", for: .normal)
+            registerKeyButton.tintColor = .systemRed
+            return
+        }
+
+        let url = URL(string: "https://www.keywitness.io/api/keys/register")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        let payload: [String: String] = ["publicKey": key, "name": deviceName]
+        let payload: [String: String] = ["publicKey": publicKey, "name": name, "signature": signature]
         request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
 
         registerKeyButton.isEnabled = false
@@ -372,14 +412,14 @@ class MainViewController: UIViewController {
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200, error == nil {
-                    self.registerKeyButton.setTitle("Registered!", for: .normal)
+                    self.registerKeyButton.setTitle("Registered as \"\(name)\"", for: .normal)
                     self.registerKeyButton.tintColor = .systemGreen
                 } else {
                     self.registerKeyButton.setTitle("Failed", for: .normal)
                     self.registerKeyButton.tintColor = .systemRed
                 }
                 self.registerKeyButton.isEnabled = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
                     self.registerKeyButton.setTitle("Register Key", for: .normal)
                     self.registerKeyButton.tintColor = self.accentColor
                 }

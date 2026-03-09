@@ -53,6 +53,7 @@ http.route({
     const result = await ctx.runMutation(api.keys.register, {
       publicKey: body.publicKey,
       name: body.name,
+      signature: body.signature,
     });
     return new Response(JSON.stringify(result), {
       status: 200,
