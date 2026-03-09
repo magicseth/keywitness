@@ -585,60 +585,36 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
                     {hasKeystrokeData && (
                       <KeystrokeTimeline timings={result.keystrokeTimings!} />
                     )}
+
+                    {/* Verify another */}
+                    <div className="px-5 py-3">
+                      <div className="text-xs text-gray-600 mb-1.5">Verify another</div>
+                      <textarea
+                        className="w-full h-20 bg-[#0a0a0a] border border-gray-800 rounded p-2.5 font-mono text-xs text-gray-300 placeholder-gray-600 focus:outline-none focus:border-gray-600 resize-y mb-2"
+                        placeholder="Paste attestation..."
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                            e.preventDefault();
+                            onVerifyClick();
+                          }
+                        }}
+                      />
+                      <button
+                        onClick={onVerifyClick}
+                        disabled={verifying || !input.trim()}
+                        className="text-xs px-3 py-1.5 bg-white text-black font-medium rounded hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                      >
+                        {verifying ? "Checking..." : "Verify"}
+                      </button>
+                    </div>
                   </div>
                 </details>
               </div>
             )}
           </div>
         )}
-
-        {/* ── Attestation input (bottom) ── */}
-        <div className="border border-gray-800 rounded-lg p-5 mb-10">
-          <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">
-            {result ? "Verify another" : "Paste attestation"}
-          </h2>
-          <textarea
-            className="w-full h-32 bg-[#0a0a0a] border border-gray-800 rounded-lg p-4 font-mono text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-gray-600 focus:ring-1 focus:ring-gray-600 resize-y mb-3"
-            placeholder={`-----BEGIN KEYWITNESS ATTESTATION-----\n(paste attestation here)\n-----END KEYWITNESS ATTESTATION-----`}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-                onVerifyClick();
-              }
-            }}
-          />
-          <div className="flex items-center gap-3">
-            <button
-              onClick={onVerifyClick}
-              disabled={verifying || !input.trim()}
-              className="px-6 py-2.5 bg-white text-black font-medium rounded-lg hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            >
-              {verifying ? "Checking..." : "Verify"}
-            </button>
-            <span className="text-gray-600 text-sm">
-              Cmd/Ctrl + Enter
-            </span>
-          </div>
-        </div>
-
-        {/* ── How it works ── */}
-        <div className="border border-gray-800 rounded-lg p-6 mb-10">
-          <h2 className="text-lg font-semibold text-white mb-4">
-            How does this work?
-          </h2>
-          <div className="space-y-3 text-sm text-gray-400">
-            <p>
-              KeyWitness is a keyboard for iPhone that seals every message you type with a
-              digital signature. When someone receives your message, they can verify here
-              that it really came from you and hasn't been edited.
-            </p>
-            <p>
-              Verification happens entirely in your browser. Nothing is sent to any server.
-            </p>
-          </div>
-        </div>
 
         {/* Footer */}
         <footer className="text-center text-gray-600 text-xs py-6 border-t border-gray-800 space-y-2">
@@ -748,13 +724,20 @@ function KeystrokeTimeline({
             Where each key was pressed. Brightness shows how firmly it was touched.
           </p>
           <div className="flex flex-wrap gap-1">
-            {timings.map((t, i) => {
-              const displayKey = t.key === " " ? "\u2423" : t.key;
+            {(() => {
+              const xs = timings.map((t) => t.x ?? 0);
+              const ys = timings.map((t) => t.y ?? 0);
+              const minX = Math.min(...xs), maxX = Math.max(...xs);
+              const minY = Math.min(...ys), maxY = Math.max(...ys);
+              const rangeX = maxX - minX || 1;
+              const rangeY = maxY - minY || 1;
               const maxRadius = Math.max(...timings.map((tt) => tt.radius ?? 0), 1);
+              return timings.map((t, i) => {
+              const displayKey = t.key === " " ? "\u2423" : t.key;
               const radiusNorm = (t.radius ?? 0) / maxRadius;
               const opacity = Math.max(0.25, radiusNorm);
-              const dotX = t.x !== undefined ? Math.min(Math.max(t.x / 2, 2), 22) : 12;
-              const dotY = t.y !== undefined ? Math.min(Math.max(t.y / 2, 2), 22) : 12;
+              const dotX = t.x !== undefined ? 2 + ((t.x - minX) / rangeX) * 20 : 12;
+              const dotY = t.y !== undefined ? 2 + ((t.y - minY) / rangeY) * 20 : 12;
               return (
                 <div
                   key={i}
@@ -773,7 +756,8 @@ function KeystrokeTimeline({
                   />
                 </div>
               );
-            })}
+            });
+            })()}
           </div>
         </div>
       )}

@@ -236,6 +236,113 @@ script-src https://keywitness.io;`}</Code>
 });`}</Code>
           </Section>
 
+          {/* Emoji Key Encoding */}
+          <Section title="Emoji Key Encoding">
+            <p>
+              KeyWitness encodes the 256-bit AES decryption key as 27 human emoji in the URL
+              fragment (<code className="bg-[#1f2937] px-1.5 py-0.5 rounded text-green-400 text-xs">#</code>).
+              This spec is everything you need to write a compatible encoder/decoder.
+            </p>
+
+            <h4 className="text-gray-300 font-medium mt-4 mb-2">Alphabet</h4>
+            <p>
+              129 Unicode <code className="bg-[#1f2937] px-1.5 py-0.5 rounded text-green-400 text-xs">Emoji_Modifier_Base</code> codepoints,
+              each with 6 variants (no skin tone + 5 Fitzpatrick modifiers) = <strong className="text-white">774 symbols</strong>.
+            </p>
+            <p className="mt-2">
+              Skin tone modifiers (appended as a second codepoint):
+            </p>
+            <Code>{`none   (base emoji alone — yellow default)
+U+1F3FB  🏻  Type-1-2  (light)
+U+1F3FC  🏼  Type-3    (medium-light)
+U+1F3FD  🏽  Type-4    (medium)
+U+1F3FE  🏾  Type-5    (medium-dark)
+U+1F3FF  🏿  Type-6    (dark)`}</Code>
+
+            <p className="mt-3">
+              The 129 base codepoints, in order (hex):
+            </p>
+            <Code>{`261D 26F9 270A 270B 270C 270D
+1F385 1F3C2 1F3C3 1F3C4 1F3C7 1F3CA 1F3CB 1F3CC
+1F442 1F443 1F446 1F447 1F448 1F449 1F44A 1F44B
+1F44C 1F44D 1F44E 1F44F 1F450
+1F466 1F467 1F468 1F469 1F46B 1F46C 1F46D 1F46E
+1F470 1F471 1F472 1F473 1F474 1F475 1F476 1F477
+1F478 1F47C
+1F481 1F482 1F483 1F485 1F486 1F487 1F4AA
+1F574 1F575 1F57A 1F590 1F595 1F596
+1F645 1F646 1F647 1F64B 1F64C 1F64D 1F64E 1F64F
+1F6A3 1F6B4 1F6B5 1F6B6 1F6C0 1F6CC
+1F90C 1F90F 1F918 1F919 1F91A 1F91B 1F91C 1F91D
+1F91E 1F91F
+1F926 1F930 1F931 1F932 1F933 1F934 1F935 1F936
+1F937 1F938 1F939 1F93D 1F93E
+1F977 1F9B5 1F9B6 1F9B8 1F9B9 1F9BB
+1F9CD 1F9CE 1F9CF 1F9D1 1F9D2 1F9D3 1F9D4 1F9D5
+1F9D6 1F9D7 1F9D8 1F9D9 1F9DA 1F9DB 1F9DC 1F9DD
+1FAC3 1FAC4 1FAC5
+1FAF0 1FAF1 1FAF2 1FAF3 1FAF4 1FAF5 1FAF6 1FAF7 1FAF8`}</Code>
+
+            <h4 className="text-gray-300 font-medium mt-4 mb-2">Symbol index</h4>
+            <p>
+              Each base codepoint gets 6 consecutive indices. For base <code className="bg-[#1f2937] px-1.5 py-0.5 rounded text-green-400 text-xs">i</code> (0-indexed
+              in the list above):
+            </p>
+            <Code>{`index = i * 6 + tone_offset
+
+tone_offset:
+  0 = no modifier (yellow)
+  1 = U+1F3FB
+  2 = U+1F3FC
+  3 = U+1F3FD
+  4 = U+1F3FE
+  5 = U+1F3FF
+
+Total symbols: 129 × 6 = 774`}</Code>
+
+            <h4 className="text-gray-300 font-medium mt-4 mb-2">Encoding algorithm</h4>
+            <Code>{`function encode(key: Uint8Array[32]) -> string:
+    // 1. Interpret the 32 bytes as a big-endian unsigned integer
+    n = bytes_to_bigint(key)  // big-endian
+
+    // 2. Convert to base-774, least-significant digit first
+    digits = []
+    for i in 0..27:
+        digits.push(n % 774)
+        n = n / 774            // integer division
+
+    // 3. Map each digit to its emoji
+    return digits.map(d => alphabet[d]).join("")`}</Code>
+
+            <h4 className="text-gray-300 font-medium mt-4 mb-2">Decoding algorithm</h4>
+            <Code>{`function decode(emoji_string: string) -> Uint8Array[32]:
+    // 1. Parse emoji (handle 2-codepoint skin-tone sequences)
+    indices = parse_emoji_to_indices(emoji_string)
+    assert len(indices) == 27
+
+    // 2. Reconstruct the big integer (most-significant digit last)
+    n = 0
+    for i in 26..0 (reverse):
+        n = n * 774 + indices[i]
+
+    // 3. Convert back to 32 big-endian bytes
+    return bigint_to_bytes(n, 32)`}</Code>
+
+            <h4 className="text-gray-300 font-medium mt-4 mb-2">Test vectors</h4>
+            <Code>{`// All zeros (32 bytes of 0x00)
+key:   AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+emoji: ☝☝☝☝☝☝☝☝☝☝☝☝☝☝☝☝☝☝☝☝☝☝☝☝☝☝☝
+
+// Incrementing (0x00 0x01 0x02 ... 0x1F)
+key:   AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8
+emoji: 🧔🏻🤌🏾👃🏻💂🏿🧚🏼🤽🤛🏿🤲🏾☝🏼🚴🏼🚴👱🧚🏾👉🏿🕴🏽🤞🏿🥷🏼👰🏻👮🏼🖕🏼🫃🏽👌🏽👆🏼👷🏻🏄🏿☝🏻☝`}</Code>
+            <p className="mt-2 text-xs text-gray-500">
+              The key is base64url-encoded (no padding). Use the reference implementation
+              at <code className="bg-[#1f2937] px-1.5 py-0.5 rounded text-green-400 text-xs">src/lib/stegkey.ts</code> to
+              generate additional test vectors.
+            </p>
+          </Section>
+
           {/* W3C Standards */}
           <Section title="Standards">
             <p>

@@ -26,8 +26,8 @@ class KeyWitnessKeyboard: KeyboardInputViewController {
 
     var keystrokeEvents: [KeystrokeEvent] = []
     var composedText = ""  // Running cleartext built from keystrokes + backspaces
-    var touchTracker: BiometricTouchTracker?
-    var pendingTouchDown: (time: TimeInterval, x: CGFloat, y: CGFloat, force: CGFloat, radius: CGFloat)?
+    var pendingTouchDown: (time: TimeInterval, x: CGFloat, y: CGFloat)?
+    private var touchOverlay: TouchCaptureOverlay?
     var isAttesting = false
     var hasInsertedSignal = false
 
@@ -61,34 +61,31 @@ class KeyWitnessKeyboard: KeyboardInputViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        installTouchTracker()
+        installTouchOverlay()
         hasInsertedSignal = false
         keystrokeEvents.removeAll()
         composedText = ""
     }
 
-    // MARK: - Touch Tracking Overlay
+    // MARK: - Touch Capture
 
-    private func installTouchTracker() {
-        guard touchTracker == nil, let inputView = self.inputView else { return }
-
-        let tracker = BiometricTouchTracker { [weak self] touchData in
-            if touchData.phase == .began {
-                self?.pendingTouchDown = (
-                    time: touchData.timestamp,
-                    x: touchData.x,
-                    y: touchData.y,
-                    force: touchData.force,
-                    radius: touchData.radius
-                )
-            }
+    /// Adds a transparent UIView on top of the keyboard that captures the exact
+    /// touch-down point via hitTest, then returns nil to pass the touch through
+    /// to the keyboard buttons below.
+    private func installTouchOverlay() {
+        guard touchOverlay == nil, let inputView = self.inputView else { return }
+        let overlay = TouchCaptureOverlay { [weak self] point in
+            self?.pendingTouchDown = (
+                time: ProcessInfo.processInfo.systemUptime,
+                x: point.x,
+                y: point.y
+            )
         }
-        tracker.cancelsTouchesInView = false
-        tracker.delaysTouchesBegan = false
-        tracker.delaysTouchesEnded = false
-        tracker.delegate = tracker
-        inputView.addGestureRecognizer(tracker)
-        self.touchTracker = tracker
+        overlay.frame = inputView.bounds
+        overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        inputView.addSubview(overlay)
+        inputView.bringSubviewToFront(overlay)
+        self.touchOverlay = overlay
     }
 
     /// Insert then immediately delete an invisible two-character signal so
@@ -119,8 +116,8 @@ class KeyWitnessKeyboard: KeyboardInputViewController {
             touchUpTime: now,
             x: down?.x ?? 0,
             y: down?.y ?? 0,
-            force: down?.force ?? 0,
-            majorRadius: down?.radius ?? 0
+            force: 0,
+            majorRadius: 0
         )
         keystrokeEvents.append(keystroke)
 
@@ -442,53 +439,30 @@ struct KeyWitnessKeyboardView: View {
     }
 }
 
-// MARK: - Biometric Touch Tracker
+// MARK: - Touch Capture Overlay
 
-/// A gesture recognizer that captures touch-down biometric data (coordinates,
-/// force, radius, timing) without interfering with the keyboard's own gestures.
-class BiometricTouchTracker: UIGestureRecognizer, UIGestureRecognizerDelegate {
+/// Transparent UIView overlay that captures exact touch-down coordinates via
+/// hitTest, then returns nil to pass the touch through to the keyboard below.
+/// hitTest is called before gesture recognizer dispatch, so it always fires.
+class TouchCaptureOverlay: UIView {
 
-    struct TouchData {
-        let phase: UITouch.Phase
-        let timestamp: TimeInterval
-        let x: CGFloat
-        let y: CGFloat
-        let force: CGFloat
-        let radius: CGFloat
+    private let onTouchDown: (CGPoint) -> Void
+
+    init(onTouchDown: @escaping (CGPoint) -> Void) {
+        self.onTouchDown = onTouchDown
+        super.init(frame: .zero)
+        backgroundColor = .clear
+        isUserInteractionEnabled = true
     }
 
-    private let onTouch: (TouchData) -> Void
+    required init?(coder: NSCoder) { fatalError() }
 
-    init(onTouch: @escaping (TouchData) -> Void) {
-        self.onTouch = onTouch
-        super.init(target: nil, action: nil)
-    }
-
-    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
-        for touch in touches {
-            let loc = touch.location(in: view)
-            onTouch(TouchData(
-                phase: .began,
-                timestamp: touch.timestamp,
-                x: loc.x, y: loc.y,
-                force: touch.force,
-                radius: touch.majorRadius
-            ))
-        }
-    }
-
-    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
-        state = .failed  // Always fail so we don't consume the touch
-    }
-
-    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
-        state = .failed
-    }
-
-    // Allow simultaneous recognition with all other gesture recognizers
-    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
-                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
-        return true
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        // point is in our local coordinate space (== inputView bounds).
+        // Convert to window coordinates for a stable reference frame.
+        let windowPoint = convert(point, to: nil)
+        onTouchDown(windowPoint)
+        return nil  // pass touch through to keyboard buttons
     }
 }
 
