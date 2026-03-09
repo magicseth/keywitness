@@ -35,6 +35,10 @@
 		B1B2C3D4E5F60015000B0001 /* KeyWitnessWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B1B2C3D4E5F60005000B0001 /* KeyWitnessWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		C1B2C3D4E5F60003000C0001 /* KeyboardKit in Frameworks */ = {isa = PBXBuildFile; productRef = C1B2C3D4E5F60002000C0001 /* KeyboardKit */; };
 		D1B2C3D4E5F60001000D0001 /* EmojiKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1B2C3D4E5F60002000D0001 /* EmojiKey.swift */; };
+		G1B2C3D4E5F60001000A0001 /* BLEConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1B2C3D4E5F60011000A0001 /* BLEConstants.swift */; };
+		G1B2C3D4E5F60002000A0001 /* BLETypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1B2C3D4E5F60012000A0001 /* BLETypes.swift */; };
+		G1B2C3D4E5F60003000A0001 /* BLEPeripheralManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1B2C3D4E5F60013000A0001 /* BLEPeripheralManager.swift */; };
+		G1B2C3D4E5F60004000A0001 /* BLEAttestationFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1B2C3D4E5F60014000A0001 /* BLEAttestationFlow.swift */; };
 		F1B2C3D4E5F60001000F0001 /* PhotoTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1B2C3D4E5F60011000F0001 /* PhotoTypes.swift */; };
 		F1B2C3D4E5F60002000F0001 /* PhotoCaptureSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1B2C3D4E5F60012000F0001 /* PhotoCaptureSession.swift */; };
 		F1B2C3D4E5F60003000F0001 /* PhotoVCBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1B2C3D4E5F60013000F0001 /* PhotoVCBuilder.swift */; };
@@ -105,6 +109,10 @@
 		B1B2C3D4E5F60003000B0001 /* KeyWitnessWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyWitnessWidgetBundle.swift; sourceTree = "<group>"; };
 		B1B2C3D4E5F60004000B0001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B1B2C3D4E5F60005000B0001 /* KeyWitnessWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = KeyWitnessWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		G1B2C3D4E5F60011000A0001 /* BLEConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BLEConstants.swift; sourceTree = "<group>"; };
+		G1B2C3D4E5F60012000A0001 /* BLETypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BLETypes.swift; sourceTree = "<group>"; };
+		G1B2C3D4E5F60013000A0001 /* BLEPeripheralManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BLEPeripheralManager.swift; sourceTree = "<group>"; };
+		G1B2C3D4E5F60014000A0001 /* BLEAttestationFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BLEAttestationFlow.swift; sourceTree = "<group>"; };
 		F1B2C3D4E5F60011000F0001 /* PhotoTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoTypes.swift; sourceTree = "<group>"; };
 		F1B2C3D4E5F60012000F0001 /* PhotoCaptureSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoCaptureSession.swift; sourceTree = "<group>"; };
 		F1B2C3D4E5F60013000F0001 /* PhotoVCBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoVCBuilder.swift; sourceTree = "<group>"; };
@@ -164,6 +172,7 @@
 				A1B2C3D4E5F60093000A0001 /* AppAttestManager.swift */,
 				E1B2C3D4E5F60020000E0001 /* Voice */,
 				F1B2C3D4E5F60020000F0001 /* Photo */,
+				G1B2C3D4E5F60020000A0001 /* BLE */,
 				A1B2C3D4E5F60097000A0001 /* LaunchScreen.storyboard */,
 				A1B2C3D4E5F60091000A0001 /* Assets.xcassets */,
 				A1B2C3D4E5F60016000A0001 /* Info.plist */,
@@ -236,6 +245,17 @@
 				E1B2C3D4E5F60005000E0001 /* VoiceRecordingViewController.swift */,
 			);
 			path = Voice;
+			sourceTree = "<group>";
+		};
+		G1B2C3D4E5F60020000A0001 /* BLE */ = {
+			isa = PBXGroup;
+			children = (
+				G1B2C3D4E5F60011000A0001 /* BLEConstants.swift */,
+				G1B2C3D4E5F60012000A0001 /* BLETypes.swift */,
+				G1B2C3D4E5F60013000A0001 /* BLEPeripheralManager.swift */,
+				G1B2C3D4E5F60014000A0001 /* BLEAttestationFlow.swift */,
+			);
+			path = BLE;
 			sourceTree = "<group>";
 		};
 		B1B2C3D4E5F60021000B0001 /* KeyWitnessWidgets */ = {
@@ -402,6 +422,10 @@
 				F1B2C3D4E5F60002000F0001 /* PhotoCaptureSession.swift in Sources */,
 				F1B2C3D4E5F60003000F0001 /* PhotoVCBuilder.swift in Sources */,
 				F1B2C3D4E5F60004000F0001 /* PhotoCaptureViewController.swift in Sources */,
+				G1B2C3D4E5F60001000A0001 /* BLEConstants.swift in Sources */,
+				G1B2C3D4E5F60002000A0001 /* BLETypes.swift in Sources */,
+				G1B2C3D4E5F60003000A0001 /* BLEPeripheralManager.swift in Sources */,
+				G1B2C3D4E5F60004000A0001 /* BLEAttestationFlow.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -580,6 +604,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = KeyWitness/Info.plist;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "KeyWitness uses Bluetooth to receive keystroke timing from web browsers and sign attestations.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "KeyWitness uses the front camera for TrueDepth face tracking during voice attestations.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "KeyWitness uses Face ID to verify your identity for cryptographic attestations.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "KeyWitness records audio during voice attestations to prove spoken content.";
@@ -587,6 +612,7 @@
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_NSSupportsLiveActivitiesFrequentUpdates = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UIBackgroundModes = "bluetooth-peripheral";
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -615,6 +641,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = KeyWitness/Info.plist;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "KeyWitness uses Bluetooth to receive keystroke timing from web browsers and sign attestations.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "KeyWitness uses the front camera for TrueDepth face tracking during voice attestations.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "KeyWitness uses Face ID to verify your identity for cryptographic attestations.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "KeyWitness records audio during voice attestations to prove spoken content.";
@@ -622,6 +649,7 @@
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_NSSupportsLiveActivitiesFrequentUpdates = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UIBackgroundModes = "bluetooth-peripheral";
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";

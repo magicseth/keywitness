@@ -12,6 +12,8 @@
  *   const result = await KeyWitness.verify(attestationBlock);
  */
 
+import * as ble from "./ble";
+
 const ORIGIN = (() => {
   try {
     const s = document.currentScript as HTMLScriptElement | null;
@@ -204,6 +206,22 @@ const KeyWitness = {
     el.addEventListener("input", handler);
     return () => el.removeEventListener("input", handler);
   },
+
+  /**
+   * BLE attestation: connect to a KeyWitness iPhone via Bluetooth.
+   */
+  ble: {
+    /** Check if Web Bluetooth is available in this browser. */
+    isSupported: ble.isSupported,
+    /** Connect to a KeyWitness iPhone. Prompts user to select device. */
+    connect: ble.connect,
+  },
+
+  /**
+   * Attach BLE attestation to a form. Captures keystrokes and requests
+   * attestation from the connected iPhone on form submit.
+   */
+  attestForm: ble.attestForm,
 
   /**
    * Auto-render badges for all elements with data-keywitness attribute,

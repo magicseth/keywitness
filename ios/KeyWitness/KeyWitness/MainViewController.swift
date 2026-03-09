@@ -2,6 +2,7 @@ import UIKit
 import LocalAuthentication
 import UserNotifications
 import ActivityKit
+import CoreBluetooth
 
 /// Container app main screen. Shows setup instructions, the device public key,
 /// and a test text field to try the KeyWitness keyboard.
@@ -24,6 +25,14 @@ class MainViewController: UIViewController {
     private let testHeader = UILabel()
     private let testTextView = UITextView()
     private let biometricStatusLabel = UILabel()
+
+    // MARK: - BLE
+
+    private var bleManager: BLEPeripheralManager?
+    private var bleAttestationFlow: BLEAttestationFlow?
+    private let bleToggle = UISwitch()
+    private let bleStatusLabel = UILabel()
+    private let bleKeystrokeCount = UILabel()
 
     // MARK: - Colors
 
@@ -489,6 +498,9 @@ class MainViewController: UIViewController {
         // Public key section
         setupPublicKeySection()
 
+        // BLE section
+        setupBLECard()
+
         // Test field section
         setupTestField()
     }
@@ -814,6 +826,79 @@ class MainViewController: UIViewController {
         URLSession.shared.dataTask(with: request) { _, _, _ in }.resume()
     }
 
+    // MARK: - BLE Card
+
+    private func setupBLECard() {
+        let card = UIView()
+        card.backgroundColor = cardColor
+        card.layer.cornerRadius = 12
+        card.translatesAutoresizingMaskIntoConstraints = false
+        contentStack.addArrangedSubview(card)
+
+        let header = UILabel()
+        header.text = "Web Attestation (BLE)"
+        header.font = UIFont.systemFont(ofSize: 20, weight: .semibold)
+        header.textColor = .white
+
+        let description = UILabel()
+        description.text = "Enable to let web browsers connect via Bluetooth and attest text you type on any website."
+        description.font = UIFont.systemFont(ofSize: 14, weight: .regular)
+        description.textColor = .lightGray
+        description.numberOfLines = 0
+
+        // Toggle row
+        let toggleLabel = UILabel()
+        toggleLabel.text = "BLE Advertising"
+        toggleLabel.font = UIFont.systemFont(ofSize: 15, weight: .medium)
+        toggleLabel.textColor = .white
+
+        bleToggle.onTintColor = accentColor
+        bleToggle.addTarget(self, action: #selector(bleToggleChanged), for: .valueChanged)
+
+        let toggleRow = UIStackView(arrangedSubviews: [toggleLabel, bleToggle])
+        toggleRow.axis = .horizontal
+        toggleRow.alignment = .center
+
+        // Status
+        bleStatusLabel.font = UIFont.systemFont(ofSize: 14, weight: .medium)
+        bleStatusLabel.textColor = .lightGray
+        bleStatusLabel.text = "Off"
+
+        bleKeystrokeCount.font = UIFont.monospacedDigitSystemFont(ofSize: 14, weight: .regular)
+        bleKeystrokeCount.textColor = accentColor
+        bleKeystrokeCount.isHidden = true
+
+        let stack = UIStackView(arrangedSubviews: [header, description, toggleRow, bleStatusLabel, bleKeystrokeCount])
+        stack.axis = .vertical
+        stack.spacing = 12
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 16),
+            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
+            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
+            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -16)
+        ])
+    }
+
+    @objc private func bleToggleChanged() {
+        if bleToggle.isOn {
+            if bleManager == nil {
+                bleManager = BLEPeripheralManager()
+                bleManager?.delegate = self
+                bleAttestationFlow = BLEAttestationFlow(viewController: self, bleManager: bleManager!)
+            }
+            bleManager?.startAdvertising()
+            bleStatusLabel.text = "Advertising — waiting for connection…"
+            bleStatusLabel.textColor = .systemYellow
+        } else {
+            bleManager?.stopAdvertising()
+            bleStatusLabel.text = "Off"
+            bleStatusLabel.textColor = .lightGray
+            bleKeystrokeCount.isHidden = true
+        }
+    }
+
     // MARK: - Keyboard Dismiss
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -836,6 +921,33 @@ extension MainViewController: UITextViewDelegate {
             textView.text = "Tap here, switch to KeyWitness keyboard, and type something..."
             textView.textColor = .gray
         }
+    }
+}
+
+// MARK: - BLEPeripheralDelegate
+
+extension MainViewController: BLEPeripheralDelegate {
+    func bleSessionStarted(_ session: BLESession) {
+        bleStatusLabel.text = "Connected — listening for keystrokes"
+        bleStatusLabel.textColor = .systemGreen
+        bleKeystrokeCount.text = "0 keystrokes"
+        bleKeystrokeCount.isHidden = false
+    }
+
+    func bleKeystrokeReceived(_ session: BLESession, count: Int) {
+        bleKeystrokeCount.text = "\(count) keystroke\(count == 1 ? "" : "s")"
+    }
+
+    func bleAttestationRequested(_ session: BLESession, cleartext: String, cleartextHash: Data) {
+        bleStatusLabel.text = "Attestation requested — confirm below"
+        bleStatusLabel.textColor = .systemOrange
+        bleAttestationFlow?.requestAttestation(session: session, cleartext: cleartext)
+    }
+
+    func bleSessionEnded() {
+        bleStatusLabel.text = "Disconnected — waiting for connection…"
+        bleStatusLabel.textColor = .systemYellow
+        bleKeystrokeCount.isHidden = true
     }
 }
 
