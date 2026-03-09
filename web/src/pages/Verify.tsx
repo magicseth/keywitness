@@ -26,24 +26,35 @@ function attributeCleartext(
     return [...cleartext].map((char) => ({ char, attested: false }));
   }
 
-  // Build the typed alphanumeric sequence from keystroke events
-  const typedAlpha: string[] = [];
+  // Replay keystrokes (including backspaces) to get the actual final typed text.
+  // This correctly handles cases where the user types "hou", backspaces 3x,
+  // then types "you" — the final text is "you" from the last 3 keystrokes.
+  const composed: string[] = [];
   for (const t of timings) {
-    const k = t.key === "space" ? " " : t.key;
-    // Only track alphanumeric chars for matching
-    if (/[a-zA-Z0-9]/.test(k)) {
-      typedAlpha.push(k.toLowerCase());
+    if (t.key === "backspace") {
+      composed.pop();
+    } else {
+      const k = t.key === "space" ? " " : t.key === "newline" ? "\n" : t.key;
+      composed.push(k);
     }
   }
 
-  // Walk through cleartext and match alphanumeric chars against typed sequence
+  // Build alphanumeric-only sequence from composed text for matching
+  const composedAlpha: string[] = [];
+  for (const ch of composed) {
+    if (/[a-zA-Z0-9]/.test(ch)) {
+      composedAlpha.push(ch.toLowerCase());
+    }
+  }
+
+  // Walk through cleartext and match alphanumeric chars against composed sequence
   let typedIdx = 0;
   return [...cleartext].map((char) => {
     if (!/[a-zA-Z0-9]/.test(char)) {
       // Non-alphanumeric: neutral (shown normally)
       return { char, attested: true };
     }
-    if (typedIdx < typedAlpha.length && char.toLowerCase() === typedAlpha[typedIdx]) {
+    if (typedIdx < composedAlpha.length && char.toLowerCase() === composedAlpha[typedIdx]) {
       typedIdx++;
       return { char, attested: true };
     }
