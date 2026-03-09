@@ -112,6 +112,49 @@ export default function Developers() {
             </div>
           </Section>
 
+          {/* BLE Web Attestation */}
+          <Section title="BLE Web Attestation">
+            <p>
+              Let users attest text typed on any website using their iPhone as a hardware trust anchor.
+              The phone connects via Bluetooth, receives keystroke timing in real time, then signs with
+              Face ID + App Attest.
+            </p>
+            <Code>{`<script src="https://keywitness.io/embed.js"></script>
+<script>
+  // One-liner: attach to any form
+  KeyWitness.attestForm('#my-form', '#my-textarea', {
+    onAttestation(result) {
+      console.log(result.attestationBlock);
+    }
+  });
+</script>`}</Code>
+            <p className="mt-3">
+              Or use the lower-level API for full control:
+            </p>
+            <Code>{`// Check browser support
+if (KeyWitness.ble.isSupported()) {
+  const conn = await KeyWitness.ble.connect();
+  console.log('Connected to', conn.session.deviceDID);
+
+  // Send keystrokes as user types
+  textarea.addEventListener('keyup', (e) => {
+    conn.sendKeystroke(e.key, downMs, upMs);
+  });
+
+  // Request attestation (triggers Face ID on phone)
+  const result = await conn.requestAttestation(textarea.value);
+  // result.attestationBlock = PEM-encoded W3C VC 2.0
+}`}</Code>
+            <p className="mt-3">
+              <a href="/demo" className="text-blue-400 hover:underline font-medium">
+                Try the live demo &rarr;
+              </a>
+            </p>
+            <p className="mt-1 text-xs text-gray-500">
+              Requires Chrome or Edge. Safari and Firefox do not support Web Bluetooth.
+            </p>
+          </Section>
+
           {/* REST API */}
           <Section title="REST API">
             <p>

@@ -2,6 +2,7 @@ import Verify from "./pages/Verify";
 import HowItWorks from "./pages/HowItWorks";
 import Developers from "./pages/Developers";
 import Manifesto from "./pages/Manifesto";
+import BLEDemo from "./pages/BLEDemo";
 
 export default function App() {
   const path = window.location.pathname;
@@ -16,6 +17,10 @@ export default function App() {
 
   if (path === "/manifesto") {
     return <Manifesto />;
+  }
+
+  if (path === "/demo") {
+    return <BLEDemo />;
   }
 
   // /v/{shortId} — direct short ID
