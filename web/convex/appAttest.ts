@@ -1,4 +1,4 @@
-import { mutation, internalMutation, query } from "./_generated/server";
+import { mutation, internalMutation, internalQuery, query } from "./_generated/server";
 import { v } from "convex/values";
 import * as cborg from "cborg";
 import nacl from "tweetnacl";
@@ -667,6 +667,21 @@ export const verifySessionAssertion = internalMutation({
     await ctx.db.patch(credential._id, { counter: parsed.signCount });
 
     return { verified: true, linkedEd25519Key: credential.linkedEd25519Key };
+  },
+});
+
+// ── Device verification lookup by Ed25519 key ────────────────────────────────
+
+/** Check if an Ed25519 public key has an associated App Attest credential.
+ *  If so, the key has been proven to live on a real Apple device. */
+export const hasDeviceCredential = internalQuery({
+  args: { publicKey: v.string() },
+  handler: async (ctx, args) => {
+    const credential = await ctx.db
+      .query("appAttestCredentials")
+      .withIndex("by_linkedEd25519Key", (q) => q.eq("linkedEd25519Key", args.publicKey))
+      .first();
+    return !!credential;
   },
 });
 

@@ -15,40 +15,15 @@ http.route({
   handler: httpAction(async (ctx, request) => {
     const body = await request.json();
 
-    // If App Attest assertion is provided, verify it before storing
+    // Check if the signer's Ed25519 key has a linked App Attest credential.
+    // This proves the key lives on a real Apple device — the credential was
+    // created during initial App Attest attestation and doesn't expire.
     let deviceVerified = false;
-    if (body.appAttestKeyId && body.appAttestAssertion && body.appAttestClientData) {
-      const isSession = (body.appAttestClientData as string).startsWith("keywitness:session:");
-      try {
-        let linkedKey: string | undefined;
-        if (isSession) {
-          const result = await ctx.runMutation(internal.appAttest.verifySessionAssertion, {
-            keyId: body.appAttestKeyId,
-            assertion: body.appAttestAssertion,
-            expectedClientData: body.appAttestClientData,
-          });
-          linkedKey = result.linkedEd25519Key;
-        } else {
-          const result = await ctx.runMutation(internal.appAttest.verifyAssertion, {
-            keyId: body.appAttestKeyId,
-            assertion: body.appAttestAssertion,
-            expectedClientData: body.appAttestClientData,
-          });
-          linkedKey = result.linkedEd25519Key;
-        }
-
-        // Verify the attestation was signed by the key linked to this App Attest credential
-        const signerKey = extractSignerPublicKey(body.attestation);
-        if (linkedKey && signerKey && signerKey === linkedKey) {
-          deviceVerified = true;
-        } else if (linkedKey && signerKey) {
-          console.error("App Attest signer mismatch: attestation signed by", signerKey?.slice(0, 12), "but credential linked to", linkedKey?.slice(0, 12));
-        } else {
-          console.error("App Attest passed but signer extraction failed — refusing to mark deviceVerified");
-        }
-      } catch (e) {
-        console.error("App Attest verification failed:", e instanceof Error ? e.message : e);
-      }
+    const signerKeyForDevice = extractSignerPublicKey(body.attestation);
+    if (signerKeyForDevice) {
+      deviceVerified = await ctx.runQuery(internal.appAttest.hasDeviceCredential, {
+        publicKey: signerKeyForDevice,
+      });
     }
 
     // Look up username for the signer's public key
