@@ -375,6 +375,10 @@ class KeyWitnessKeyboard: UIInputViewController {
 
                     switch result {
                     case .success(let url):
+                        let before = self.textDocumentProxy.documentContextBeforeInput ?? ""
+                        if !before.isEmpty && !before.hasSuffix(" ") && !before.hasSuffix("\n") {
+                            self.textDocumentProxy.insertText(" ")
+                        }
                         self.textDocumentProxy.insertText(url)
                     case .failure:
                         self.textDocumentProxy.insertText("\n\n" + attestationBlock)
