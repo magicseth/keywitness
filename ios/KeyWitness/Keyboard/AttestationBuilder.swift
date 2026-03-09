@@ -19,6 +19,19 @@ struct KeystrokeEvent: Codable {
     }
 }
 
+// MARK: - Keystroke Timing
+
+/// A single keystroke's timing and biometric data, relative to session start.
+struct KeystrokeTiming: Codable {
+    let key: String
+    let downAt: TimeInterval  // ms relative to first keyDown
+    let upAt: TimeInterval    // ms relative to first keyDown
+    let x: CGFloat            // touch x within key
+    let y: CGFloat            // touch y within key
+    let force: CGFloat        // 3D Touch / haptic force
+    let radius: CGFloat       // finger contact radius
+}
+
 // MARK: - Attestation Payload
 
 /// The full attestation payload matching the KeyWitness protocol.
@@ -26,20 +39,12 @@ struct Attestation: Codable {
     let version: String
     let cleartext: String
     let deviceId: String
+    let faceIdVerified: Bool
     let timestamp: String
     let keystrokeBiometricsHash: String
+    let keystrokeTimings: [KeystrokeTiming]
     let signature: String
     let publicKey: String
-
-    enum CodingKeys: String, CodingKey {
-        case version
-        case cleartext
-        case deviceId          = "deviceId"
-        case timestamp
-        case keystrokeBiometricsHash = "keystrokeBiometricsHash"
-        case signature
-        case publicKey         = "publicKey"
-    }
 }
 
 // MARK: - Attestation Builder
@@ -53,18 +58,21 @@ final class AttestationBuilder {
     /// Creates a full attestation for the given cleartext and keystroke events.
     /// Returns the PEM-style attestation text block ready for insertion.
     static func createAttestation(cleartext: String,
-                                  keystrokeEvents: [KeystrokeEvent]) throws -> String {
+                                  keystrokeEvents: [KeystrokeEvent],
+                                  faceIdVerified: Bool) throws -> String {
 
         let deviceId = deviceIdentifier()
         let timestamp = iso8601Timestamp()
         let biometricsHash = hashKeystrokeBiometrics(keystrokeEvents)
         let publicKey = try CryptoEngine.publicKeyBase64URL()
+        let timings = buildKeystrokeTimings(keystrokeEvents)
 
-        // Build the canonical signing payload
+        // Build the canonical signing payload (does NOT include keystrokeTimings)
         let signingPayload = canonicalSigningPayload(
             version: protocolVersion,
             cleartext: cleartext,
             deviceId: deviceId,
+            faceIdVerified: faceIdVerified,
             timestamp: timestamp,
             keystrokeBiometricsHash: biometricsHash
         )
@@ -79,8 +87,10 @@ final class AttestationBuilder {
             version: protocolVersion,
             cleartext: cleartext,
             deviceId: deviceId,
+            faceIdVerified: faceIdVerified,
             timestamp: timestamp,
             keystrokeBiometricsHash: biometricsHash,
+            keystrokeTimings: timings,
             signature: signature,
             publicKey: publicKey
         )
@@ -95,23 +105,41 @@ final class AttestationBuilder {
     static func canonicalSigningPayload(version: String,
                                         cleartext: String,
                                         deviceId: String,
+                                        faceIdVerified: Bool,
                                         timestamp: String,
                                         keystrokeBiometricsHash: String) -> String {
         // Manually construct sorted-key JSON to guarantee deterministic output.
-        // Keys in alphabetical order: cleartext, deviceId, keystrokeBiometricsHash, timestamp, version
-        let pairs: [(String, String)] = [
-            ("cleartext", cleartext),
-            ("deviceId", deviceId),
-            ("keystrokeBiometricsHash", keystrokeBiometricsHash),
-            ("timestamp", timestamp),
-            ("version", version)
-        ]
+        // Keys in alphabetical order: cleartext, deviceId, faceIdVerified, keystrokeBiometricsHash, timestamp, version
+        return "{"
+            + "\"\(jsonEscape("cleartext"))\":\"\(jsonEscape(cleartext))\","
+            + "\"\(jsonEscape("deviceId"))\":\"\(jsonEscape(deviceId))\","
+            + "\"faceIdVerified\":\(faceIdVerified),"
+            + "\"\(jsonEscape("keystrokeBiometricsHash"))\":\"\(jsonEscape(keystrokeBiometricsHash))\","
+            + "\"\(jsonEscape("timestamp"))\":\"\(jsonEscape(timestamp))\","
+            + "\"\(jsonEscape("version"))\":\"\(jsonEscape(version))\""
+            + "}"
+    }
 
-        let entries = pairs.map { key, value in
-            "\"\(jsonEscape(key))\":\"\(jsonEscape(value))\""
+    // MARK: - Keystroke Timings
+
+    /// Builds relative keystroke timings from raw events.
+    /// All times are in milliseconds relative to the first keyDown (which becomes 0ms).
+    static func buildKeystrokeTimings(_ events: [KeystrokeEvent]) -> [KeystrokeTiming] {
+        guard let firstDownTime = events.first?.touchDownTime else {
+            return []
         }
 
-        return "{\(entries.joined(separator: ","))}"
+        return events.map { event in
+            KeystrokeTiming(
+                key: event.key,
+                downAt: (event.touchDownTime - firstDownTime) * 1000.0,
+                upAt: (event.touchUpTime - firstDownTime) * 1000.0,
+                x: round(event.x * 100) / 100,
+                y: round(event.y * 100) / 100,
+                force: round(event.force * 1000) / 1000,
+                radius: round(event.majorRadius * 100) / 100
+            )
+        }
     }
 
     // MARK: - Keystroke Biometrics Hash

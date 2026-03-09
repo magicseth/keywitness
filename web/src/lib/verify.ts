@@ -3,13 +3,23 @@ import nacl from "tweetnacl";
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface Attestation {
-  version: number;
+  version: string;
   cleartext: string;
   deviceId: string;
+  faceIdVerified?: boolean;
   timestamp: string;
   publicKey: string; // base64url-encoded Ed25519 public key
   signature: string; // base64url-encoded Ed25519 signature
   keystrokeBiometricsHash?: string;
+  keystrokeTimings?: Array<{
+    key: string;
+    downAt: number;
+    upAt: number;
+    x?: number;
+    y?: number;
+    force?: number;
+    radius?: number;
+  }>;
   appAttestToken?: string;
 }
 
@@ -17,19 +27,27 @@ export interface VerificationResult {
   valid: boolean;
   cleartext?: string;
   deviceId?: string;
+  faceIdVerified?: boolean;
   timestamp?: string;
   publicKey?: string;
   publicKeyFingerprint?: string;
   keystrokeBiometricsHash?: string;
+  keystrokeTimings?: Array<{
+    key: string;
+    downAt: number;
+    upAt: number;
+    x?: number;
+    y?: number;
+    force?: number;
+    radius?: number;
+  }>;
   error?: string;
 }
 
 // ── Base64url helpers ────────────────────────────────────────────────────────
 
 function base64urlDecode(input: string): Uint8Array {
-  // Convert base64url to standard base64
   let base64 = input.replace(/-/g, "+").replace(/_/g, "/");
-  // Pad to multiple of 4
   while (base64.length % 4 !== 0) {
     base64 += "=";
   }
@@ -50,9 +68,11 @@ function bytesToHex(bytes: Uint8Array): string {
 // ── Fingerprint ──────────────────────────────────────────────────────────────
 
 async function computeFingerprint(publicKeyBytes: Uint8Array): Promise<string> {
-  const hash = await crypto.subtle.digest("SHA-256", publicKeyBytes as unknown as ArrayBuffer);
+  const hash = await crypto.subtle.digest(
+    "SHA-256",
+    publicKeyBytes as unknown as ArrayBuffer,
+  );
   const hex = bytesToHex(new Uint8Array(hash));
-  // Format as colon-separated pairs (first 16 bytes = 32 hex chars)
   return hex
     .slice(0, 32)
     .match(/.{2}/g)!
@@ -60,7 +80,6 @@ async function computeFingerprint(publicKeyBytes: Uint8Array): Promise<string> {
 }
 
 // ── Canonical payload reconstruction ─────────────────────────────────────────
-// Must match the iOS signing algorithm: sorted-keys JSON of the payload fields.
 
 function buildCanonicalPayload(attestation: Attestation): string {
   const payload: Record<string, unknown> = {
@@ -71,12 +90,14 @@ function buildCanonicalPayload(attestation: Attestation): string {
     version: attestation.version,
   };
 
+  if (attestation.faceIdVerified !== undefined) {
+    payload.faceIdVerified = attestation.faceIdVerified;
+  }
+
   if (attestation.appAttestToken) {
     payload.appAttestToken = attestation.appAttestToken;
   }
 
-  // Sorted keys — Object.keys on an object literal with alphabetically-ordered
-  // keys is already sorted, but we sort explicitly for safety.
   const sortedKeys = Object.keys(payload).sort();
   const sorted: Record<string, unknown> = {};
   for (const key of sortedKeys) {
@@ -99,7 +120,7 @@ function parseAttestationBlock(raw: string): Attestation {
     throw new Error(
       "Invalid attestation format: missing BEGIN/END markers. " +
         "Paste the full block including the -----BEGIN KEYWITNESS ATTESTATION----- " +
-        "and -----END KEYWITNESS ATTESTATION----- lines."
+        "and -----END KEYWITNESS ATTESTATION----- lines.",
     );
   }
 
@@ -117,7 +138,7 @@ function parseAttestationBlock(raw: string): Attestation {
     decoded = new TextDecoder().decode(bytes);
   } catch {
     throw new Error(
-      "Failed to decode attestation body. Ensure the base64url content is intact."
+      "Failed to decode attestation body. Ensure the base64url content is intact.",
     );
   }
 
@@ -128,7 +149,6 @@ function parseAttestationBlock(raw: string): Attestation {
     throw new Error("Attestation body is not valid JSON.");
   }
 
-  // Validate required fields
   const required: (keyof Attestation)[] = [
     "version",
     "cleartext",
@@ -149,12 +169,11 @@ function parseAttestationBlock(raw: string): Attestation {
 // ── Main verification function ───────────────────────────────────────────────
 
 export async function verifyAttestation(
-  rawInput: string
+  rawInput: string,
 ): Promise<VerificationResult> {
   try {
     const attestation = parseAttestationBlock(rawInput.trim());
 
-    // Decode public key and signature
     let publicKeyBytes: Uint8Array;
     let signatureBytes: Uint8Array;
     try {
@@ -170,24 +189,22 @@ export async function verifyAttestation(
 
     if (publicKeyBytes.length !== 32) {
       throw new Error(
-        `Invalid public key length: expected 32 bytes, got ${publicKeyBytes.length}.`
+        `Invalid public key length: expected 32 bytes, got ${publicKeyBytes.length}.`,
       );
     }
     if (signatureBytes.length !== 64) {
       throw new Error(
-        `Invalid signature length: expected 64 bytes, got ${signatureBytes.length}.`
+        `Invalid signature length: expected 64 bytes, got ${signatureBytes.length}.`,
       );
     }
 
-    // Reconstruct canonical payload
     const canonical = buildCanonicalPayload(attestation);
     const messageBytes = new TextEncoder().encode(canonical);
 
-    // Verify Ed25519 signature
     const valid = nacl.sign.detached.verify(
       messageBytes,
       signatureBytes,
-      publicKeyBytes
+      publicKeyBytes,
     );
 
     const fingerprint = await computeFingerprint(publicKeyBytes);
@@ -196,11 +213,15 @@ export async function verifyAttestation(
       valid,
       cleartext: attestation.cleartext,
       deviceId: attestation.deviceId,
+      faceIdVerified: attestation.faceIdVerified,
       timestamp: attestation.timestamp,
       publicKey: attestation.publicKey,
       publicKeyFingerprint: fingerprint,
       keystrokeBiometricsHash: attestation.keystrokeBiometricsHash,
-      error: valid ? undefined : "Signature verification failed. The content may have been tampered with.",
+      keystrokeTimings: attestation.keystrokeTimings,
+      error: valid
+        ? undefined
+        : "Signature verification failed. The content may have been tampered with.",
     };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);

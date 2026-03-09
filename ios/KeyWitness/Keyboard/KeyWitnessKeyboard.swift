@@ -12,12 +12,21 @@ class KeyWitnessKeyboard: UIInputViewController {
     // MARK: - Configuration
 
     /// Base URL for the KeyWitness API. Change this for development/staging environments.
-    static var serverBaseURL = "http://192.168.50.195:3000"  // TODO: change to https://keywitness.io for production
+    static var serverBaseURL = "https://quick-curlew-492.convex.site"
 
     // MARK: - State
 
     private var keystrokeEvents: [KeystrokeEvent] = []
     private var pendingTouches: [UIButton: (key: String, downTime: TimeInterval, x: CGFloat, y: CGFloat, force: CGFloat, radius: CGFloat)] = [:]
+    /// Whether Face ID was verified in the container app (read from App Group).
+    private var sessionFaceIdVerified: Bool {
+        let defaults = UserDefaults(suiteName: "group.io.keywitness")
+        guard let timestamp = defaults?.object(forKey: "faceIdVerifiedAt") as? Date else {
+            return false
+        }
+        // Face ID session is valid for 10 minutes
+        return Date().timeIntervalSince(timestamp) < 600
+    }
     private var isShifted = false
     private weak var attestButton: UIButton?
 
@@ -345,43 +354,36 @@ class KeyWitnessKeyboard: UIInputViewController {
         let afterCursor = textDocumentProxy.documentContextAfterInput ?? ""
         let cleartext = beforeCursor + afterCursor
 
-        guard !cleartext.isEmpty else {
-            // Nothing to attest
-            return
-        }
+        guard !cleartext.isEmpty else { return }
+
+        setAttestButtonLoading(true)
+
+        // Check if Face ID was verified in the container app (via App Group)
+        let faceIdVerified = sessionFaceIdVerified
 
         do {
             let attestationBlock = try AttestationBuilder.createAttestation(
                 cleartext: cleartext,
-                keystrokeEvents: keystrokeEvents
+                keystrokeEvents: keystrokeEvents,
+                faceIdVerified: faceIdVerified
             )
 
-            // Show loading state on the Attest button
-            setAttestButtonLoading(true)
-
-            // Attempt to upload the attestation to the server.
-            // On success, insert just the short URL. On failure, fall back to
-            // inserting the full attestation block inline.
             uploadAttestation(attestationBlock) { [weak self] result in
                 DispatchQueue.main.async {
                     guard let self = self else { return }
-
                     self.setAttestButtonLoading(false)
 
                     switch result {
                     case .success(let url):
                         self.textDocumentProxy.insertText(url)
                     case .failure:
-                        // Network unavailable or server error — fall back to inline block
                         self.textDocumentProxy.insertText("\n\n" + attestationBlock)
                     }
-
-                    // Clear keystroke buffer after attestation
                     self.keystrokeEvents.removeAll()
                 }
             }
         } catch {
-            // Insert error indication
+            setAttestButtonLoading(false)
             textDocumentProxy.insertText("\n[Attestation error: \(error.localizedDescription)]")
         }
     }

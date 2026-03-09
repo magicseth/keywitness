@@ -1,4 +1,5 @@
 import UIKit
+import LocalAuthentication
 
 /// Container app main screen. Shows setup instructions, the device public key,
 /// and a test text field to try the KeyWitness keyboard.
@@ -15,6 +16,7 @@ class MainViewController: UIViewController {
     private let publicKeyHeader = UILabel()
     private let publicKeyLabel = UILabel()
     private let copyKeyButton = UIButton(type: .system)
+    private let registerKeyButton = UIButton(type: .system)
     private let testHeader = UILabel()
     private let testTextView = UITextView()
 
@@ -26,13 +28,50 @@ class MainViewController: UIViewController {
 
     // MARK: - Lifecycle
 
+    private let faceIdStatusLabel = UILabel()
+
     override func viewDidLoad() {
         super.viewDidLoad()
         setupUI()
         loadPublicKey()
+        promptFaceId()
 
         NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillShow(_:)), name: UIResponder.keyboardWillShowNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillHide(_:)), name: UIResponder.keyboardWillHideNotification, object: nil)
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        // Re-verify Face ID each time the app comes to foreground
+        promptFaceId()
+    }
+
+    private func promptFaceId() {
+        let context = LAContext()
+        context.localizedFallbackTitle = ""
+        var error: NSError?
+        guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) else {
+            updateFaceIdStatus(verified: false)
+            return
+        }
+        context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics,
+                               localizedReason: "Verify your identity for KeyWitness attestations") { [weak self] success, _ in
+            DispatchQueue.main.async {
+                if success {
+                    // Write verification timestamp to App Group so keyboard can read it
+                    let defaults = UserDefaults(suiteName: "group.io.keywitness")
+                    defaults?.set(Date(), forKey: "faceIdVerifiedAt")
+                }
+                self?.updateFaceIdStatus(verified: success)
+            }
+        }
+    }
+
+    private func updateFaceIdStatus(verified: Bool) {
+        faceIdStatusLabel.text = verified
+            ? "Face ID: Verified (valid for 10 min)"
+            : "Face ID: Not verified"
+        faceIdStatusLabel.textColor = verified ? .systemGreen : .systemRed
     }
 
     override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
@@ -106,6 +145,9 @@ class MainViewController: UIViewController {
         // Instructions card
         setupInstructionsCard()
 
+        // Face ID section
+        setupFaceIdSection()
+
         // Public key section
         setupPublicKeySection()
 
@@ -150,6 +192,51 @@ class MainViewController: UIViewController {
         ])
     }
 
+    private func setupFaceIdSection() {
+        let card = UIView()
+        card.backgroundColor = cardColor
+        card.layer.cornerRadius = 12
+        card.translatesAutoresizingMaskIntoConstraints = false
+        contentStack.addArrangedSubview(card)
+
+        let header = UILabel()
+        header.text = "Face ID"
+        header.font = UIFont.systemFont(ofSize: 20, weight: .semibold)
+        header.textColor = .white
+
+        faceIdStatusLabel.font = UIFont.systemFont(ofSize: 15, weight: .medium)
+        faceIdStatusLabel.text = "Checking..."
+        faceIdStatusLabel.textColor = .lightGray
+
+        let reverifyButton = UIButton(type: .system)
+        reverifyButton.setTitle("Re-verify Face ID", for: .normal)
+        reverifyButton.tintColor = accentColor
+        reverifyButton.addTarget(self, action: #selector(reverifyFaceId), for: .touchUpInside)
+
+        let desc = UILabel()
+        desc.text = "Face ID verification is included in attestations. Valid for 10 minutes."
+        desc.font = UIFont.systemFont(ofSize: 13)
+        desc.textColor = .lightGray
+        desc.numberOfLines = 0
+
+        let stack = UIStackView(arrangedSubviews: [header, faceIdStatusLabel, reverifyButton, desc])
+        stack.axis = .vertical
+        stack.spacing = 10
+        stack.alignment = .center
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 16),
+            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
+            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
+            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -16)
+        ])
+    }
+
+    @objc private func reverifyFaceId() {
+        promptFaceId()
+    }
+
     private func setupPublicKeySection() {
         let card = UIView()
         card.backgroundColor = cardColor
@@ -172,6 +259,11 @@ class MainViewController: UIViewController {
         copyKeyButton.tintColor = accentColor
         copyKeyButton.addTarget(self, action: #selector(copyPublicKey), for: .touchUpInside)
 
+        registerKeyButton.setTitle("Register Key", for: .normal)
+        registerKeyButton.titleLabel?.font = UIFont.systemFont(ofSize: 15, weight: .medium)
+        registerKeyButton.tintColor = accentColor
+        registerKeyButton.addTarget(self, action: #selector(registerPublicKey), for: .touchUpInside)
+
         let description = UILabel()
         description.text = "Share this key to let others verify your attestations."
         description.font = UIFont.systemFont(ofSize: 13, weight: .regular)
@@ -179,7 +271,7 @@ class MainViewController: UIViewController {
         description.textAlignment = .center
         description.numberOfLines = 0
 
-        let stack = UIStackView(arrangedSubviews: [publicKeyHeader, publicKeyLabel, copyKeyButton, description])
+        let stack = UIStackView(arrangedSubviews: [publicKeyHeader, publicKeyLabel, copyKeyButton, registerKeyButton, description])
         stack.axis = .vertical
         stack.spacing = 12
         stack.alignment = .center
@@ -257,6 +349,42 @@ class MainViewController: UIViewController {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             self.copyKeyButton.setTitle(original, for: .normal)
         }
+    }
+
+    @objc private func registerPublicKey() {
+        guard let key = publicKeyLabel.text, !key.starts(with: "Error"), !key.starts(with: "Loading") else {
+            return
+        }
+
+        let deviceName = UIDevice.current.name
+        let url = URL(string: "https://quick-curlew-492.convex.site/api/keys/register")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let payload: [String: String] = ["publicKey": key, "name": deviceName]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+
+        registerKeyButton.isEnabled = false
+        registerKeyButton.setTitle("Registering...", for: .normal)
+
+        URLSession.shared.dataTask(with: request) { [weak self] _, response, error in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200, error == nil {
+                    self.registerKeyButton.setTitle("Registered!", for: .normal)
+                    self.registerKeyButton.tintColor = .systemGreen
+                } else {
+                    self.registerKeyButton.setTitle("Failed", for: .normal)
+                    self.registerKeyButton.tintColor = .systemRed
+                }
+                self.registerKeyButton.isEnabled = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    self.registerKeyButton.setTitle("Register Key", for: .normal)
+                    self.registerKeyButton.tintColor = self.accentColor
+                }
+            }
+        }.resume()
     }
 
     // MARK: - Keyboard Dismiss
