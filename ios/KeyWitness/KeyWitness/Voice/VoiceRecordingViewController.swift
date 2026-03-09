@@ -3,8 +3,12 @@ import ARKit
 import SwiftUI
 
 /// Full-screen voice recording view controller.
-/// Shows the front camera with face tracking, real-time transcription,
-/// and controls to record/stop/seal.
+///
+/// Flow:
+/// 1. Tap "Start" → calibration phase (read prompt aloud)
+/// 2. Automatic transition → recording phase (say your attestation)
+/// 3. Tap "Stop" → review results
+/// 4. Tap "Seal" to upload, or "Cancel" to redo
 class VoiceRecordingViewController: UIViewController, ARSCNViewDelegate {
 
     // MARK: - State
@@ -12,13 +16,14 @@ class VoiceRecordingViewController: UIViewController, ARSCNViewDelegate {
     private let recordingSession = VoiceRecordingSession()
     private var arView: ARSCNView!
     private var faceGeometryNode: SCNNode?
+    private var promptLabel: UILabel!
     private var transcriptionLabel: UILabel!
     private var statusLabel: UILabel!
     private var recordButton: UIButton!
     private var cancelButton: UIButton!
     private var correlationLabel: UILabel!
-    private var isRecording = false
     private var lastResult: VoiceRecordingSession.Result?
+    private var calibrationTimer: Timer?
 
     // MARK: - Lifecycle
 
@@ -28,11 +33,17 @@ class VoiceRecordingViewController: UIViewController, ARSCNViewDelegate {
         setupUI()
 
         recordingSession.onTranscriptionUpdate = { [weak self] text in
-            self?.transcriptionLabel.text = text.isEmpty ? "Start speaking..." : text
+            guard self?.recordingSession.phase == .recording else { return }
+            self?.transcriptionLabel.text = text.isEmpty ? "Say what you want to attest..." : text
         }
         recordingSession.onFaceTrackingUpdate = { [weak self] tracked in
-            self?.statusLabel.text = tracked ? "Face tracked" : "No face detected"
-            self?.statusLabel.textColor = tracked ? .systemGreen : .systemOrange
+            if self?.recordingSession.phase == .calibrating {
+                self?.statusLabel.text = tracked ? "Reading prompt..." : "No face — look at camera"
+                self?.statusLabel.textColor = tracked ? .systemGreen : .systemOrange
+            } else if self?.recordingSession.phase == .recording {
+                self?.statusLabel.text = tracked ? "Recording..." : "No face detected"
+                self?.statusLabel.textColor = tracked ? .systemRed : .systemOrange
+            }
         }
     }
 
@@ -50,9 +61,9 @@ class VoiceRecordingViewController: UIViewController, ARSCNViewDelegate {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        if isRecording {
+        calibrationTimer?.invalidate()
+        if recordingSession.phase != .idle {
             _ = recordingSession.stop()
-            isRecording = false
         }
         arView.session.pause()
     }
@@ -60,7 +71,7 @@ class VoiceRecordingViewController: UIViewController, ARSCNViewDelegate {
     // MARK: - UI Setup
 
     private func setupUI() {
-        // AR view (front camera preview with face mesh overlay)
+        // AR view with face mesh overlay
         arView = ARSCNView(frame: .zero)
         arView.session = recordingSession.arSession
         arView.delegate = self
@@ -85,9 +96,19 @@ class VoiceRecordingViewController: UIViewController, ARSCNViewDelegate {
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(statusLabel)
 
+        // Prompt label (shown during calibration)
+        promptLabel = UILabel()
+        promptLabel.textColor = UIColor(red: 1.0, green: 0.85, blue: 0.4, alpha: 1.0)
+        promptLabel.font = .systemFont(ofSize: 16, weight: .medium)
+        promptLabel.textAlignment = .center
+        promptLabel.numberOfLines = 0
+        promptLabel.translatesAutoresizingMaskIntoConstraints = false
+        promptLabel.isHidden = true
+        view.addSubview(promptLabel)
+
         // Transcription label
         transcriptionLabel = UILabel()
-        transcriptionLabel.text = "Tap record and speak"
+        transcriptionLabel.text = "Tap Start to begin"
         transcriptionLabel.textColor = .white
         transcriptionLabel.font = .systemFont(ofSize: 22, weight: .light)
         transcriptionLabel.textAlignment = .center
@@ -95,16 +116,17 @@ class VoiceRecordingViewController: UIViewController, ARSCNViewDelegate {
         transcriptionLabel.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(transcriptionLabel)
 
-        // Correlation label (shown after recording)
+        // Correlation label
         correlationLabel = UILabel()
         correlationLabel.textColor = .systemGray
         correlationLabel.font = .systemFont(ofSize: 12)
         correlationLabel.textAlignment = .center
+        correlationLabel.numberOfLines = 0
         correlationLabel.translatesAutoresizingMaskIntoConstraints = false
         correlationLabel.isHidden = true
         view.addSubview(correlationLabel)
 
-        // Button stack (cancel + record/seal)
+        // Buttons
         cancelButton = UIButton(type: .system)
         cancelButton.translatesAutoresizingMaskIntoConstraints = false
         cancelButton.setTitle("Cancel", for: .normal)
@@ -137,7 +159,11 @@ class VoiceRecordingViewController: UIViewController, ARSCNViewDelegate {
             statusLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
             statusLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
 
-            transcriptionLabel.topAnchor.constraint(equalTo: statusLabel.bottomAnchor, constant: 20),
+            promptLabel.topAnchor.constraint(equalTo: statusLabel.bottomAnchor, constant: 12),
+            promptLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            promptLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+
+            transcriptionLabel.topAnchor.constraint(equalTo: promptLabel.bottomAnchor, constant: 16),
             transcriptionLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
             transcriptionLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
 
@@ -158,8 +184,10 @@ class VoiceRecordingViewController: UIViewController, ARSCNViewDelegate {
     }
 
     private func updateRecordButton() {
-        if lastResult != nil && !isRecording {
-            // Show "Seal" button with checkmark badge + cancel button
+        let phase = recordingSession.phase
+
+        if lastResult != nil && phase == .idle {
+            // Seal state
             let attachment = NSTextAttachment()
             attachment.image = UIImage(systemName: "checkmark.seal.fill")?.withTintColor(.white, renderingMode: .alwaysOriginal)
             let imageString = NSAttributedString(attachment: attachment)
@@ -172,7 +200,15 @@ class VoiceRecordingViewController: UIViewController, ARSCNViewDelegate {
             recordButton.backgroundColor = UIColor(red: 0.20, green: 0.55, blue: 1.0, alpha: 1)
             recordButton.layer.cornerRadius = 12
             cancelButton.isHidden = false
-        } else if isRecording {
+        } else if phase == .calibrating {
+            recordButton.setAttributedTitle(nil, for: .normal)
+            recordButton.setTitle("Done", for: .normal)
+            recordButton.setTitleColor(.white, for: .normal)
+            recordButton.titleLabel?.font = .systemFont(ofSize: 18, weight: .semibold)
+            recordButton.backgroundColor = .systemOrange
+            recordButton.layer.cornerRadius = 12
+            cancelButton.isHidden = true
+        } else if phase == .recording {
             recordButton.setAttributedTitle(nil, for: .normal)
             recordButton.setTitle("Stop", for: .normal)
             recordButton.setTitleColor(.white, for: .normal)
@@ -182,7 +218,7 @@ class VoiceRecordingViewController: UIViewController, ARSCNViewDelegate {
             cancelButton.isHidden = true
         } else {
             recordButton.setAttributedTitle(nil, for: .normal)
-            recordButton.setTitle("Record", for: .normal)
+            recordButton.setTitle("Start", for: .normal)
             recordButton.setTitleColor(.white, for: .normal)
             recordButton.titleLabel?.font = .systemFont(ofSize: 18, weight: .semibold)
             recordButton.backgroundColor = .systemRed
@@ -199,7 +235,8 @@ class VoiceRecordingViewController: UIViewController, ARSCNViewDelegate {
 
     @objc private func cancelTapped() {
         lastResult = nil
-        transcriptionLabel.text = "Tap record and speak"
+        transcriptionLabel.text = "Tap Start to begin"
+        promptLabel.isHidden = true
         correlationLabel.isHidden = true
         statusLabel.text = "Ready"
         statusLabel.textColor = .systemGray
@@ -207,36 +244,100 @@ class VoiceRecordingViewController: UIViewController, ARSCNViewDelegate {
     }
 
     @objc private func recordTapped() {
-        if lastResult != nil && !isRecording {
+        let phase = recordingSession.phase
+
+        if lastResult != nil && phase == .idle {
             // Seal
             seal()
-        } else if isRecording {
-            // Stop
+        } else if phase == .calibrating {
+            // End calibration → transition to recording
+            calibrationTimer?.invalidate()
+            endCalibrationAndStartRecording()
+        } else if phase == .recording {
+            // Stop recording → show results
             let result = recordingSession.stop()
-            isRecording = false
             lastResult = result
 
+            promptLabel.isHidden = true
             correlationLabel.isHidden = false
             let scoreText = String(format: "%.0f%%", result.audioMeshCorrelation.score * 100)
-            correlationLabel.text = "Liveness: \(scoreText) correlation · \(result.faceMeshFrames.count) face frames · \(result.audioDurationMs)ms"
+            correlationLabel.text = "Liveness: \(scoreText) · \(result.faceMeshFrames.count) frames · lag \(Int(result.calibrationLagMs))ms · \(result.audioDurationMs)ms"
             statusLabel.text = "Ready to seal"
+            statusLabel.textColor = .systemGray
             updateRecordButton()
         } else {
-            // Start
+            // Start calibration
             do {
                 lastResult = nil
                 correlationLabel.isHidden = true
-                try recordingSession.start()
-                isRecording = true
-                transcriptionLabel.text = "Start speaking..."
-                statusLabel.text = "Recording..."
-                statusLabel.textColor = .systemRed
+                try recordingSession.startCalibration()
+
+                // Show calibration prompt
+                let prompt = recordingSession.calibrationPrompt
+                promptLabel.text = "Read aloud: \"\(prompt.text)\""
+                promptLabel.isHidden = false
+                transcriptionLabel.text = ""
+                statusLabel.text = "Read the prompt above, then tap Done"
+                statusLabel.textColor = .systemYellow
                 updateRecordButton()
+
+                // Auto-transition after minimum time as a fallback
+                let minDuration = Double(prompt.minimumDurationMs) / 1000.0
+                calibrationTimer = Timer.scheduledTimer(withTimeInterval: minDuration, repeats: false) { [weak self] _ in
+                    // Don't auto-transition — just update the button to say "Done"
+                    DispatchQueue.main.async {
+                        self?.statusLabel.text = "Tap Done when finished reading"
+                    }
+                }
             } catch {
                 statusLabel.text = error.localizedDescription
                 statusLabel.textColor = .systemRed
             }
         }
+    }
+
+    private func endCalibrationAndStartRecording() {
+        guard recordingSession.phase == .calibrating else { return }
+
+        let calibration = recordingSession.endCalibration()
+        NSLog("[VoiceAttest] Calibration complete: lag=%.0fms, %d frames, pearson from lag detection",
+              calibration.lagMs, calibration.meshFrames.count)
+
+        // Validate calibration: must have actual speech
+        let hasEnoughFrames = calibration.meshFrames.count >= 10
+        let hasJawMovement: Bool = {
+            let jaws = calibration.meshFrames.map { $0.jawOpen }
+            guard let maxJ = jaws.max(), let minJ = jaws.min() else { return false }
+            return (maxJ - minJ) > 0.03  // jaw must have moved at least a bit
+        }()
+        let hasAudio: Bool = {
+            guard !calibration.audioSamples.isEmpty else { return false }
+            let sumSq = calibration.audioSamples.reduce(Float(0)) { $0 + $1 * $1 }
+            let rms = sqrt(sumSq / Float(calibration.audioSamples.count))
+            NSLog("[VoiceAttest] Calibration audio RMS: %.4f", rms)
+            return rms > 0.005
+        }()
+
+        if !hasEnoughFrames || !hasJawMovement || !hasAudio {
+            NSLog("[VoiceAttest] Calibration rejected: frames=%d, jawMove=%@, audio=%@",
+                  calibration.meshFrames.count, hasJawMovement ? "yes" : "no", hasAudio ? "yes" : "no")
+
+            // Stop everything and reset
+            _ = recordingSession.stop()
+            promptLabel.isHidden = true
+            transcriptionLabel.text = "Tap Start to try again"
+            statusLabel.text = "Please read the prompt aloud next time"
+            statusLabel.textColor = .systemOrange
+            updateRecordButton()
+            return
+        }
+
+        promptLabel.text = nil
+        promptLabel.isHidden = true
+        transcriptionLabel.text = "Now say what you want to attest..."
+        statusLabel.text = "Recording..."
+        statusLabel.textColor = .systemRed
+        updateRecordButton()
     }
 
     // MARK: - ARSCNViewDelegate (Face Mesh Overlay)
@@ -274,12 +375,14 @@ class VoiceRecordingViewController: UIViewController, ARSCNViewDelegate {
 
         Task {
             do {
-                // Read App Attest session
                 let defaults = UserDefaults(suiteName: "group.io.keywitness")
                 let sessionKeyId = defaults?.string(forKey: "appAttestSessionKeyId")
                 let sessionAssertion = defaults?.string(forKey: "appAttestSessionAssertion")
                 let sessionClientData = defaults?.string(forKey: "appAttestSessionClientData")
                 let sessionValid = sessionAssertion != nil
+
+                NSLog("[VoiceAttest] Sealing: transcription='%@', appAttest=%@",
+                      result.transcription, sessionValid ? "yes" : "no")
 
                 let (attestationBlock, encryptionKey) = try VoiceVCBuilder.createVC(
                     cleartext: result.transcription,
@@ -293,9 +396,10 @@ class VoiceRecordingViewController: UIViewController, ARSCNViewDelegate {
                     appAttestAssertion: sessionValid ? sessionAssertion : nil,
                     appAttestClientData: sessionValid ? sessionClientData : nil
                 )
+                NSLog("[VoiceAttest] VC built: %d chars, uploading...", attestationBlock.count)
 
-                // Upload
                 let uploadResult = try await upload(attestationBlock)
+                NSLog("[VoiceAttest] Upload success: url=%@, id=%@", uploadResult.url, uploadResult.id)
                 let fragment = EmojiKey.encode(encryptionKey) ?? encryptionKey
                 let fullURL = uploadResult.url + "#" + fragment
 
@@ -304,7 +408,6 @@ class VoiceRecordingViewController: UIViewController, ARSCNViewDelegate {
                     statusLabel.textColor = .systemGreen
                     transcriptionLabel.text = fullURL
 
-                    // Copy text + URL to clipboard
                     UIPasteboard.general.string = "\(result.transcription)\n\n\(fullURL)"
                     correlationLabel.text = "Text + link copied to clipboard"
                     correlationLabel.isHidden = false
@@ -313,6 +416,7 @@ class VoiceRecordingViewController: UIViewController, ARSCNViewDelegate {
                     updateRecordButton()
                 }
             } catch {
+                NSLog("[VoiceAttest] Seal error: %@", error.localizedDescription)
                 await MainActor.run {
                     statusLabel.text = "Error: \(error.localizedDescription)"
                     statusLabel.textColor = .systemRed

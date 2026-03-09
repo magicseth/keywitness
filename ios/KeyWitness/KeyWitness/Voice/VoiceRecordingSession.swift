@@ -7,11 +7,11 @@ import CryptoKit
 /// Orchestrates concurrent audio capture, on-device speech recognition,
 /// and ARKit face mesh tracking for voice attestation.
 ///
-/// Usage:
-///   let session = VoiceRecordingSession()
-///   try await session.start()
-///   // ... user speaks ...
-///   let result = await session.stop()
+/// Flow:
+/// 1. `startCalibration()` — user reads a known prompt (measures lag)
+/// 2. `endCalibration()` — compute lag from calibration data
+/// 3. `startRecording()` — user speaks freely
+/// 4. `stopRecording()` — returns result with calibrated analysis
 final class VoiceRecordingSession: NSObject, ARSessionDelegate {
 
     // MARK: - Result
@@ -23,6 +23,13 @@ final class VoiceRecordingSession: NSObject, ARSessionDelegate {
         let audioMeshCorrelation: AudioMeshCorrelation
         let inputSource: String         // e.g. "builtInMicrophone"
         let audioDurationMs: Int
+        let calibrationLagMs: Float
+    }
+
+    enum Phase {
+        case idle
+        case calibrating
+        case recording
     }
 
     // MARK: - State
@@ -39,10 +46,17 @@ final class VoiceRecordingSession: NSObject, ARSessionDelegate {
 
     private var recordingStartTime: TimeInterval = 0
     private var lastMeshSampleTime: TimeInterval = 0
-    private let meshSampleIntervalMs: TimeInterval = 100  // 10 Hz
+    private let meshSampleIntervalMs: TimeInterval = 50  // 20 Hz for better resolution
 
     private var currentTranscription = ""
-    private var isRecording = false
+    private(set) var phase: Phase = .idle
+
+    // Calibration state
+    private var calibrationMeshFrames: [FaceMeshFrame] = []
+    private var calibrationAudioSamples: [Float] = []
+    private var calibrationStartTime: TimeInterval = 0
+    private var calibrationLagMs: Float = 100  // default until measured
+    private(set) var calibrationPrompt: CalibrationPrompt = .random()
 
     /// Called on main thread whenever transcription updates.
     var onTranscriptionUpdate: ((String) -> Void)?
@@ -65,8 +79,6 @@ final class VoiceRecordingSession: NSObject, ARSessionDelegate {
             }
         }
 
-        // Camera permission is requested by ARKit automatically when the session starts.
-        // We check current status here.
         var camera = AVCaptureDevice.authorizationStatus(for: .video) == .authorized
         if !camera {
             camera = await AVCaptureDevice.requestAccess(for: .video)
@@ -75,11 +87,9 @@ final class VoiceRecordingSession: NSObject, ARSessionDelegate {
         return (mic, speech, camera)
     }
 
-    // MARK: - Start Recording
+    // MARK: - Start (shared setup for calibration and recording)
 
-    func start() throws {
-        guard !isRecording else { return }
-
+    private func startCapture() throws {
         // Start ARKit face tracking first (claims the camera)
         guard ARFaceTrackingConfiguration.isSupported else {
             throw VoiceRecordingError.faceTrackingUnsupported
@@ -89,7 +99,7 @@ final class VoiceRecordingSession: NSObject, ARSessionDelegate {
         arSession.delegate = self
         arSession.run(arConfig, options: [.resetTracking, .removeExistingAnchors])
 
-        // Configure audio session (compatible with ARKit camera)
+        // Configure audio session
         let audioSession = AVAudioSession.sharedInstance()
         try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
         try audioSession.setActive(true)
@@ -111,7 +121,6 @@ final class VoiceRecordingSession: NSObject, ARSessionDelegate {
         recognitionRequest.requiresOnDeviceRecognition = true
         recognitionRequest.shouldReportPartialResults = true
 
-        // Start recognition
         recognitionTask = speechRecognizer.recognitionTask(with: recognitionRequest) { [weak self] result, error in
             if let result {
                 let text = result.bestTranscription.formattedString
@@ -131,48 +140,165 @@ final class VoiceRecordingSession: NSObject, ARSessionDelegate {
         sampleRate = recordingFormat.sampleRate
 
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
-            // Feed to speech recognizer
             self?.recognitionRequest?.append(buffer)
 
-            // Collect raw samples for correlation + hashing
             guard let channelData = buffer.floatChannelData?[0] else { return }
             let frameCount = Int(buffer.frameLength)
             let samples = Array(UnsafeBufferPointer(start: channelData, count: frameCount))
-            self?.audioSamples.append(contentsOf: samples)
+
+            guard let self else { return }
+            if self.phase == .calibrating {
+                self.calibrationAudioSamples.append(contentsOf: samples)
+            } else if self.phase == .recording {
+                self.audioSamples.append(contentsOf: samples)
+            }
         }
 
         try audioEngine.start()
-
         recordingStartTime = ProcessInfo.processInfo.systemUptime
-        isRecording = true
-        NSLog("[VoiceAttest] Recording started")
+        lastMeshSampleTime = 0
+    }
+
+    private func stopCapture() {
+        audioEngine.stop()
+        audioEngine.inputNode.removeTap(onBus: 0)
+        recognitionRequest?.endAudio()
+        arSession.pause()
+
+        recognitionTask?.cancel()
+        recognitionTask = nil
+        recognitionRequest = nil
+        speechRecognizer = nil
+    }
+
+    // MARK: - Calibration Phase
+
+    func startCalibration() throws {
+        guard phase == .idle else { return }
+
+        calibrationPrompt = .random()
+        calibrationMeshFrames.removeAll()
+        calibrationAudioSamples.removeAll()
+
+        try startCapture()
+        calibrationStartTime = ProcessInfo.processInfo.systemUptime
+        phase = .calibrating
+
+        NSLog("[VoiceAttest] Calibration started: prompt='%@'", calibrationPrompt.text)
+    }
+
+    func endCalibration() -> CalibrationResult {
+        guard phase == .calibrating else {
+            return CalibrationResult(lagMs: 100, meshFrames: [], audioSamples: [], durationMs: 0)
+        }
+
+        let duration = ProcessInfo.processInfo.systemUptime - calibrationStartTime
+        let durationMs = Int(duration * 1000)
+
+        NSLog("[VoiceAttest] Calibration ended: %d mesh frames, %d audio samples, %dms",
+              calibrationMeshFrames.count, calibrationAudioSamples.count, durationMs)
+
+        // Measure lag from calibration data
+        let lagResult = AudioMeshCorrelator.correlateDetailed(
+            audioSamples: calibrationAudioSamples,
+            sampleRate: sampleRate,
+            meshFrames: calibrationMeshFrames,
+            recordingDuration: duration
+        )
+        calibrationLagMs = lagResult.lagMs
+
+        NSLog("[VoiceAttest] Calibration lag: %.0fms (pearson=%.3f at lag)", calibrationLagMs, lagResult.pearsonR)
+
+        let result = CalibrationResult(
+            lagMs: calibrationLagMs,
+            meshFrames: calibrationMeshFrames,
+            audioSamples: calibrationAudioSamples,
+            durationMs: durationMs
+        )
+
+        // Transition to recording phase — keep audio engine + AR running
+        // but restart speech recognition so calibration text doesn't leak
+        recognitionTask?.cancel()
+        recognitionTask = nil
+        recognitionRequest?.endAudio()
+        recognitionRequest = nil
+
+        // Create fresh speech recognition for the recording phase
+        let newRequest = SFSpeechAudioBufferRecognitionRequest()
+        newRequest.requiresOnDeviceRecognition = true
+        newRequest.shouldReportPartialResults = true
+        recognitionRequest = newRequest
+
+        if let sr = SFSpeechRecognizer(locale: Locale.current), sr.isAvailable {
+            sr.supportsOnDeviceRecognition = true
+            speechRecognizer = sr
+            recognitionTask = sr.recognitionTask(with: newRequest) { [weak self] result, error in
+                if let result {
+                    let text = result.bestTranscription.formattedString
+                    self?.currentTranscription = text
+                    DispatchQueue.main.async {
+                        self?.onTranscriptionUpdate?(text)
+                    }
+                }
+                if let error {
+                    NSLog("[VoiceAttest] Speech recognition error: %@", error.localizedDescription)
+                }
+            }
+        }
+
+        calibrationMeshFrames.removeAll()
+        meshFrames.removeAll()
+        audioSamples.removeAll()
+        currentTranscription = ""
+        lastMeshSampleTime = 0
+        recordingStartTime = ProcessInfo.processInfo.systemUptime
+        phase = .recording
+
+        NSLog("[VoiceAttest] Transitioned to recording phase (speech recognizer restarted)")
+
+        return result
+    }
+
+    // MARK: - Legacy start (skips calibration)
+
+    func start() throws {
+        guard phase == .idle else { return }
+        try startCapture()
+        phase = .recording
+        NSLog("[VoiceAttest] Recording started (no calibration)")
     }
 
     // MARK: - Stop Recording
 
     func stop() -> Result {
-        guard isRecording else {
+        guard phase == .recording || phase == .calibrating else {
             return Result(transcription: "", audioHash: "", faceMeshFrames: [],
-                          audioMeshCorrelation: AudioMeshCorrelation(score: 0, windowCount: 0, method: "energy-jawopen-v1"),
-                          inputSource: "unknown", audioDurationMs: 0)
+                          audioMeshCorrelation: AudioMeshCorrelation(score: 0, windowCount: 0, method: "multi-v2"),
+                          inputSource: "unknown", audioDurationMs: 0, calibrationLagMs: 0)
         }
 
-        isRecording = false
+        let wasRecording = phase == .recording
+        phase = .idle
         let duration = ProcessInfo.processInfo.systemUptime - recordingStartTime
 
-        // Stop audio
-        audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
-        recognitionRequest?.endAudio()
+        stopCapture()
 
-        // Stop ARKit — pause only, will reset on next start()
-        arSession.pause()
+        guard wasRecording else {
+            return Result(transcription: "", audioHash: "", faceMeshFrames: [],
+                          audioMeshCorrelation: AudioMeshCorrelation(score: 0, windowCount: 0, method: "multi-v2"),
+                          inputSource: "unknown", audioDurationMs: 0, calibrationLagMs: 0)
+        }
 
-        // Clean up speech recognition for reuse
-        recognitionTask?.cancel()
-        recognitionTask = nil
-        recognitionRequest = nil
-        speechRecognizer = nil
+        NSLog("[VoiceAttest] Stopping: %d audio samples (rate=%.0f), %d mesh frames, duration=%.1fs",
+              audioSamples.count, sampleRate, meshFrames.count, duration)
+
+        // Log mesh frame timestamps and jawOpen values
+        if !meshFrames.isEmpty {
+            let jawValues = meshFrames.map { String(format: "%.2f", $0.jawOpen) }.joined(separator: ",")
+            NSLog("[VoiceAttest] jawOpen values: [%@]", jawValues)
+            let timestamps = meshFrames.map { String(format: "%.0f", $0.t) }.joined(separator: ",")
+            NSLog("[VoiceAttest] mesh timestamps (ms): [%@]", timestamps)
+        }
 
         // Compute audio hash
         let audioData = audioSamples.withUnsafeBufferPointer { ptr in
@@ -180,15 +306,15 @@ final class VoiceRecordingSession: NSObject, ARSessionDelegate {
         }
         let audioHash = CryptoEngine.sha256Base64URL(audioData)
 
-        // Compute correlation
+        // Compute correlation with multi-feature analysis, using calibrated lag
         let correlation = AudioMeshCorrelator.correlate(
             audioSamples: audioSamples,
             sampleRate: sampleRate,
             meshFrames: meshFrames,
-            recordingDuration: duration
+            recordingDuration: duration,
+            calibratedLagMs: calibrationLagMs > 0 ? calibrationLagMs : nil
         )
 
-        // Get input source
         let inputSource = verifyInputSource(AVAudioSession.sharedInstance())
 
         let result = Result(
@@ -197,11 +323,12 @@ final class VoiceRecordingSession: NSObject, ARSessionDelegate {
             faceMeshFrames: meshFrames,
             audioMeshCorrelation: correlation,
             inputSource: inputSource,
-            audioDurationMs: Int(duration * 1000)
+            audioDurationMs: Int(duration * 1000),
+            calibrationLagMs: calibrationLagMs
         )
 
-        NSLog("[VoiceAttest] Recording stopped: %d mesh frames, correlation=%.3f, duration=%.1fs",
-              meshFrames.count, correlation.score, duration)
+        NSLog("[VoiceAttest] Recording stopped: %d mesh frames, score=%.3f (windows=%d), lag=%.0fms, duration=%.1fs, transcription='%@'",
+              meshFrames.count, correlation.score, correlation.windowCount, calibrationLagMs, duration, currentTranscription)
 
         // Reset all state for next recording
         audioSamples.removeAll()
@@ -215,7 +342,7 @@ final class VoiceRecordingSession: NSObject, ARSessionDelegate {
     // MARK: - ARSessionDelegate
 
     func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
-        guard isRecording else { return }
+        guard phase == .calibrating || phase == .recording else { return }
 
         for anchor in anchors {
             guard let faceAnchor = anchor as? ARFaceAnchor else { continue }
@@ -240,7 +367,12 @@ final class VoiceRecordingSession: NSObject, ARSessionDelegate {
                 mouthLowerDownLeft: bs[.mouthLowerDownLeft]?.floatValue ?? 0,
                 mouthLowerDownRight: bs[.mouthLowerDownRight]?.floatValue ?? 0
             )
-            meshFrames.append(frame)
+
+            if phase == .calibrating {
+                calibrationMeshFrames.append(frame)
+            } else {
+                meshFrames.append(frame)
+            }
 
             DispatchQueue.main.async { [weak self] in
                 self?.onFaceTrackingUpdate?(faceAnchor.isTracked)

@@ -25,16 +25,21 @@ final class VoiceVCBuilder {
         appAttestClientData: String? = nil
     ) throws -> (block: String, encryptionKey: String) {
 
+        NSLog("[VoiceVC] Creating VC: cleartext=%d chars, audioHash=%@, meshFrames=%d, correlation=%.3f, inputSource=%@, duration=%dms",
+              cleartext.count, audioHash, faceMeshFrames.count, audioMeshCorrelation.score, inputSource, audioDurationMs)
+
         let deviceId = AttestationBuilder.deviceIdentifier()
         let timestamp = AttestationBuilder.iso8601Timestamp()
         let publicKeyData = try CryptoEngine.getOrCreateSigningKey().publicKey.rawRepresentation
         let publicKeyB64 = CryptoEngine.base64URLEncode(publicKeyData)
+        NSLog("[VoiceVC] deviceId=%@, publicKey=%@, timestamp=%@", deviceId, publicKeyB64, timestamp)
 
         // Generate AES-256 key for client-side encryption
         let aesKey = CryptoEngine.generateAESKey()
 
         // Compute cleartext hash
         let cleartextHash = CryptoEngine.sha256Base64URL(Data(cleartext.utf8))
+        NSLog("[VoiceVC] cleartextHash=%@", cleartextHash)
 
         // Compute face mesh biometrics hash
         let encoder = JSONEncoder()
@@ -51,10 +56,12 @@ final class VoiceVCBuilder {
         let innerJSON = try encoder.encode(innerPayload)
         let encryptedData = try CryptoEngine.encryptAESGCM(plaintext: innerJSON, key: aesKey)
         let encryptedCleartext = CryptoEngine.base64URLEncode(encryptedData)
+        NSLog("[VoiceVC] Encrypted inner payload: %d bytes, faceMeshHash=%@", encryptedData.count, faceMeshHash)
 
         // Build did:key identifier
         let issuerDID = DIDKey.ed25519ToDIDKey(publicKeyData)
         let verificationMethod = DIDKey.verificationMethodId(for: issuerDID)
+        NSLog("[VoiceVC] issuerDID=%@", issuerDID)
 
         // Get app version
         let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
@@ -96,6 +103,7 @@ final class VoiceVCBuilder {
             ] as [String: Any]
         }
 
+        NSLog("[VoiceVC] Credential subject built. Signing with eddsa-jcs-2022...")
         // Sign with eddsa-jcs-2022
         let voiceProof = try signEddsaJcs2022(
             credential: credential,
@@ -143,6 +151,8 @@ final class VoiceVCBuilder {
         """
 
         let encryptionKey = CryptoEngine.aesKeyBase64URL(aesKey)
+        NSLog("[VoiceVC] VC created: %d bytes base64url, proofs=%d, appAttest=%@",
+              base64url.count, proofs.count, appAttestKeyId ?? "none")
         return (block: block, encryptionKey: encryptionKey)
     }
 

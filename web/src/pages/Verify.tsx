@@ -65,11 +65,27 @@ function attributeCleartext(
 
 // ── Cleartext with attribution component ────────────────────────────────────
 
-function CleartextWithAttribution({ cleartext, timings }: {
+function CleartextWithAttribution({ cleartext, timings, isVoice }: {
   cleartext: string;
   timings: KeystrokeTiming[] | undefined;
   encrypted?: boolean;
+  isVoice?: boolean;
 }) {
+  // Voice attestations: all text is attested (it's the transcription itself)
+  if (isVoice) {
+    return (
+      <div>
+        <div className="text-xl leading-relaxed break-words text-green-400">
+          {cleartext}
+        </div>
+        <div className="text-[11px] text-gray-600 mt-2 flex items-center gap-1.5">
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-400" />
+          Transcribed from verified voice input
+        </div>
+      </div>
+    );
+  }
+
   const attribution = attributeCleartext(cleartext, timings);
   const hasUnattested = attribution.some((a) => !a.attested);
 
@@ -358,14 +374,14 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
                         {/* Decorative quote accent — thin green bar */}
                         <div className="absolute left-0 top-1 bottom-1 w-[3px] rounded-full bg-green-500/25" />
                         <blockquote className="text-[22px] sm:text-[26px] leading-[1.45] text-white font-light tracking-[-0.01em]">
-                          <CleartextWithAttribution cleartext={result.cleartext} timings={result.keystrokeTimings} encrypted={result.encrypted} />
+                          <CleartextWithAttribution cleartext={result.cleartext} timings={result.keystrokeTimings} encrypted={result.encrypted} isVoice={isVoice} />
                         </blockquote>
                       </div>
                     ) : result.encrypted && !result.cleartext ? (
                       <div>
                         {result.cleartextLength ? (
                           <div className="text-2xl text-white font-light mb-4">
-                            {result.cleartextLength} characters were typed
+                            {result.cleartextLength} characters were {isVoice ? "spoken" : "typed"}
                           </div>
                         ) : null}
                         <div className="text-gray-500 text-sm mb-3">
