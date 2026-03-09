@@ -20,23 +20,33 @@ http.route({
     if (body.appAttestKeyId && body.appAttestAssertion && body.appAttestClientData) {
       const isSession = (body.appAttestClientData as string).startsWith("keywitness:session:");
       try {
+        let linkedKey: string | undefined;
         if (isSession) {
-          // Permanent session token from keyboard — reusable, skip counter check
-          await ctx.runMutation(internal.appAttest.verifySessionAssertion, {
+          const result = await ctx.runMutation(internal.appAttest.verifySessionAssertion, {
             keyId: body.appAttestKeyId,
             assertion: body.appAttestAssertion,
             expectedClientData: body.appAttestClientData,
           });
+          linkedKey = result.linkedEd25519Key;
         } else {
-          // Direct assertion — one-time use with counter increment
-          await ctx.runMutation(internal.appAttest.verifyAssertion, {
+          const result = await ctx.runMutation(internal.appAttest.verifyAssertion, {
             keyId: body.appAttestKeyId,
             assertion: body.appAttestAssertion,
             expectedClientData: body.appAttestClientData,
           });
+          linkedKey = result.linkedEd25519Key;
         }
-        deviceVerified = true;
-        console.log("App Attest verified (session=" + isSession + ") for keyId:", body.appAttestKeyId);
+
+        // Verify the attestation was signed by the key linked to this App Attest credential
+        const signerKey = extractSignerPublicKey(body.attestation);
+        if (linkedKey && signerKey && signerKey === linkedKey) {
+          deviceVerified = true;
+        } else if (linkedKey && signerKey) {
+          console.error("App Attest signer mismatch: attestation signed by", signerKey?.slice(0, 12), "but credential linked to", linkedKey?.slice(0, 12));
+        } else {
+          // Could not extract signer — still mark as verified since App Attest passed
+          deviceVerified = true;
+        }
       } catch (e) {
         console.error("App Attest verification failed:", e instanceof Error ? e.message : e);
       }
@@ -148,17 +158,22 @@ http.route({
       console.log("Biometric verify — appAttestKeyId:", body.appAttestKeyId ?? "MISSING", "hasAssertion:", !!body.appAttestAssertion, "hasClientData:", !!body.appAttestClientData);
       if (body.appAttestKeyId && body.appAttestAssertion && body.appAttestClientData) {
         try {
-          await ctx.runMutation(internal.appAttest.verifyAssertion, {
+          const attestResult = await ctx.runMutation(internal.appAttest.verifyAssertion, {
             keyId: body.appAttestKeyId,
             assertion: body.appAttestAssertion,
             expectedClientData: body.appAttestClientData,
           });
-          deviceVerified = true;
-          // Mark the attestation as device-verified
-          await ctx.runMutation(api.attestations.markDeviceVerified, {
-            shortId: body.shortId,
-          });
-          console.log("Device verified via biometric endpoint for shortId:", body.shortId);
+
+          // Verify the biometric signer matches the App Attest credential's linked key
+          if (attestResult.linkedEd25519Key === body.publicKey) {
+            deviceVerified = true;
+            await ctx.runMutation(internal.attestations.markDeviceVerified, {
+              shortId: body.shortId,
+            });
+          } else {
+            appAttestError = "Biometric key does not match App Attest credential's linked key";
+            console.error("Biometric signer mismatch:", body.publicKey?.slice(0, 12), "vs linked", attestResult.linkedEd25519Key?.slice(0, 12));
+          }
         } catch (e) {
           appAttestError = e instanceof Error ? e.message : String(e);
           console.error("App Attest in biometric verify failed:", appAttestError);
@@ -244,6 +259,7 @@ http.route({
         attestation: body.attestation,
         challenge: body.challenge,
         publicKey: body.publicKey,
+        publicKeySignature: body.publicKeySignature,
       });
       return new Response(JSON.stringify(result), {
         status: 200,
@@ -468,7 +484,21 @@ http.route({
       });
     }
 
-    // Return label-ready data for AT Protocol labeler integration
+    // Cryptographically verify the attestation before returning labels
+    const verifyResult = await verifyAttestationServerSide(doc.attestation);
+    if (!verifyResult.valid) {
+      return new Response(JSON.stringify({
+        shortId,
+        labels: [],
+        error: "Attestation cryptographic verification failed",
+        verificationError: verifyResult.error,
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      });
+    }
+
+    // Only assign labels after cryptographic verification passes
     const labels: string[] = ["keywitness-verified"];
     if (doc.deviceVerified) labels.push("device-verified");
     if (doc.biometricSignature) labels.push("biometric-verified");
@@ -739,7 +769,7 @@ http.route({
 
 // ── Verification API (Third-Party Integration) ──────────────────────────────
 
-import { verifyAttestationServerSide } from "./lib/verify";
+import { verifyAttestationServerSide, extractSignerPublicKey } from "./lib/verify";
 
 // POST /api/verify - verify a raw attestation block (server-side crypto)
 http.route({

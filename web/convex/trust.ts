@@ -11,13 +11,13 @@
  * - BitstringStatusList (W3C Recommendation) for credential-level revocation
  */
 
-import { mutation, query, internalMutation } from "./_generated/server";
+import { query, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 
 // ── App Version Trust ────────────────────────────────────────────────────────
 
-/** Mark an app version as trusted or revoked. */
-export const setAppVersionTrust = mutation({
+/** Mark an app version as trusted or revoked. Admin only (internalMutation). */
+export const setAppVersionTrust = internalMutation({
   args: {
     version: v.string(),
     trusted: v.boolean(),
@@ -51,8 +51,8 @@ export const setAppVersionTrust = mutation({
   },
 });
 
-/** Set the minimum required app version for forced upgrade. */
-export const setMinimumAppVersion = mutation({
+/** Set the minimum required app version for forced upgrade. Admin only. */
+export const setMinimumAppVersion = internalMutation({
   args: { version: v.string() },
   handler: async (ctx, args) => {
     const existing = await ctx.db
@@ -109,8 +109,8 @@ export const isAppVersionTrusted = query({
 
 // ── Provider Trust ───────────────────────────────────────────────────────────
 
-/** Add or update a trusted provider. */
-export const addProvider = mutation({
+/** Add or update a trusted provider. Admin only. */
+export const addProvider = internalMutation({
   args: {
     providerId: v.string(),
     name: v.string(),
@@ -152,8 +152,8 @@ export const addProvider = mutation({
   },
 });
 
-/** Revoke trust for a provider. */
-export const revokeProvider = mutation({
+/** Revoke trust for a provider. Admin only. */
+export const revokeProvider = internalMutation({
   args: {
     providerId: v.string(),
     reason: v.string(),
@@ -200,8 +200,8 @@ export const getProviders = query({
 
 // ── Key / Credential Revocation ──────────────────────────────────────────────
 
-/** Revoke an Ed25519 public key or App Attest credential. */
-export const revokeKey = mutation({
+/** Revoke an Ed25519 public key or App Attest credential. Admin only. */
+export const revokeKey = internalMutation({
   args: {
     type: v.union(v.literal("ed25519"), v.literal("appAttest")),
     identifier: v.string(),
@@ -231,8 +231,8 @@ export const revokeKey = mutation({
   },
 });
 
-/** Unrevoke a key (escape hatch for accidental revocations). */
-export const unrevokeKey = mutation({
+/** Unrevoke a key (escape hatch for accidental revocations). Admin only. */
+export const unrevokeKey = internalMutation({
   args: { identifier: v.string() },
   handler: async (ctx, args) => {
     const existing = await ctx.db
@@ -380,7 +380,7 @@ const MIN_BITSTRING_SIZE = 131072;
  * Create a new status list. Call once to initialize.
  * The bitstring starts as all-zeros (all credentials valid).
  */
-export const createStatusList = mutation({
+export const createStatusList = internalMutation({
   args: {
     listId: v.string(),
     statusPurpose: v.string(), // "revocation" or "suspension"
@@ -439,7 +439,7 @@ export const allocateStatusIndex = internalMutation({
  * Set a bit in the status list (revoke or suspend a credential).
  * bit=1 means revoked/suspended, bit=0 means valid.
  */
-export const setStatusBit = mutation({
+export const setStatusBit = internalMutation({
   args: {
     listId: v.string(),
     index: v.number(),
@@ -519,7 +519,7 @@ export const getStatusList = query({
 // ── Revoke a credential by shortId ───────────────────────────────────────────
 
 /** Revoke a specific attestation by its shortId. Sets its bit in the status list. */
-export const revokeAttestation = mutation({
+export const revokeAttestation = internalMutation({
   args: {
     shortId: v.string(),
     reason: v.string(),

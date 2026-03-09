@@ -93,12 +93,15 @@ final class AppAttestManager {
         NSLog("[AppAttest] Step 4: Verifying with server...")
         do {
             let ed25519PublicKey = try CryptoEngine.publicKeyBase64URL()
-            NSLog("[AppAttest] Step 4: Ed25519 key: %@...", String(ed25519PublicKey.prefix(20)))
+            // Proof-of-possession: sign the challenge with the Ed25519 key
+            let publicKeySignature = try CryptoEngine.signBase64URL(Data(challenge.utf8))
+            NSLog("[AppAttest] Step 4: Ed25519 key: %@..., PoP signature generated", String(ed25519PublicKey.prefix(20)))
             try await verifyAttestationWithServer(
                 keyId: currentKeyId,
                 attestation: attestationObject,
                 challenge: challenge,
-                publicKey: ed25519PublicKey
+                publicKey: ed25519PublicKey,
+                publicKeySignature: publicKeySignature
             )
             NSLog("[AppAttest] Step 4: Server verification succeeded!")
         } catch {
@@ -139,7 +142,7 @@ final class AppAttestManager {
         return challenge
     }
 
-    private func verifyAttestationWithServer(keyId: String, attestation: Data, challenge: String, publicKey: String) async throws {
+    private func verifyAttestationWithServer(keyId: String, attestation: Data, challenge: String, publicKey: String, publicKeySignature: String) async throws {
         let url = URL(string: "https://keywitness.io/api/app-attest/verify")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -150,6 +153,7 @@ final class AppAttestManager {
             "attestation": CryptoEngine.base64URLEncode(attestation),
             "challenge": challenge,
             "publicKey": publicKey,
+            "publicKeySignature": publicKeySignature,
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
         NSLog("[AppAttest] verifyWithServer: sending %d bytes", request.httpBody?.count ?? 0)

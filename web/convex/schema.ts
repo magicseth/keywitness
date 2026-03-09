@@ -7,6 +7,8 @@ export default defineSchema({
   attestations: defineTable({
     shortId: v.string(),
     attestation: v.string(),
+    /** SHA-256 hex hash of the attestation content for dedup */
+    attestationHash: v.optional(v.string()),
     createdAt: v.number(),
     biometricSignature: v.optional(v.string()),
     biometricPublicKey: v.optional(v.string()),
@@ -14,7 +16,8 @@ export default defineSchema({
     deviceVerified: v.optional(v.boolean()),
     /** Index into the status bitstring for revocation checking */
     statusIndex: v.optional(v.number()),
-  }).index("by_shortId", ["shortId"]),
+  }).index("by_shortId", ["shortId"])
+    .index("by_attestationHash", ["attestationHash"]),
 
   keys: defineTable({
     publicKey: v.string(),

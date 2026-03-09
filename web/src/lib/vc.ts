@@ -54,6 +54,8 @@ export interface KeyWitnessCredentialSubject {
   faceIdVerified?: boolean;
   /** App version that created this attestation */
   appVersion?: string;
+  keystrokeCount?: number;
+  cleartextLength?: number;
 }
 
 /** W3C BitstringStatusListEntry for credential revocation */

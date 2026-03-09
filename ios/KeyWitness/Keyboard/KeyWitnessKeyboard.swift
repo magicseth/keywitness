@@ -156,6 +156,7 @@ class KeyWitnessKeyboard: KeyboardInputViewController {
             } catch {
                 await MainActor.run {
                     self.isAttesting = false
+                    self.keystrokeEvents.removeAll()
                     self.textDocumentProxy.insertText("\n[Attestation error: \(error.localizedDescription)]")
                 }
             }

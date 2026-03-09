@@ -50,6 +50,9 @@ final class VCBuilder {
         let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
 
         // Build credential subject
+        // keystrokeCount and cleartextLength are unencrypted metadata so verifiers
+        // can compute coverage (what % of the text has keystroke evidence) without
+        // needing the decryption key.
         var credentialSubject: [String: Any] = [
             "type": "HumanTypedContent",
             "cleartextHash": cleartextHash,
@@ -58,6 +61,8 @@ final class VCBuilder {
             "keystrokeBiometricsHash": biometricsHash,
             "faceIdVerified": faceIdVerified,
             "appVersion": appVersion,
+            "keystrokeCount": keystrokeEvents.count,
+            "cleartextLength": cleartext.count,
         ]
 
         // Build the credential (without proof)

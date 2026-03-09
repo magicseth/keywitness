@@ -8,7 +8,7 @@
 import nacl from "tweetnacl";
 import canonicalize from "canonicalize";
 import { detectVersion, verifyVC, type KeyWitnessVC, type VCVerificationResult, type ProofVerificationResult } from "./vc";
-import { ed25519ToDIDKey } from "./didkey";
+import { ed25519ToDIDKey, decodeDIDKey } from "./didkey";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -39,6 +39,9 @@ export interface ServerVerificationResult {
   appAttestPresent?: boolean;
   appVersion?: string;
   encrypted?: boolean;
+  keystrokeCount?: number;
+  cleartextLength?: number;
+  cleartextHash?: string;
   proofs?: ProofVerificationResult[];
   error?: string;
 }
@@ -139,6 +142,9 @@ async function verifyV3(vc: KeyWitnessVC): Promise<ServerVerificationResult> {
     appAttestPresent: hasDeviceProof,
     appVersion: vc.credentialSubject.appVersion,
     encrypted: !!vc.credentialSubject.encryptedCleartext,
+    keystrokeCount: typeof vc.credentialSubject.keystrokeCount === "number" ? vc.credentialSubject.keystrokeCount : undefined,
+    cleartextLength: typeof vc.credentialSubject.cleartextLength === "number" ? vc.credentialSubject.cleartextLength : undefined,
+    cleartextHash: typeof vc.credentialSubject.cleartextHash === "string" ? vc.credentialSubject.cleartextHash : undefined,
     proofs: vcResult.proofs,
     error: vcResult.valid ? undefined : vcResult.error || "Signature verification failed.",
   };
@@ -182,6 +188,46 @@ async function verifyLegacy(parsed: Record<string, unknown>): Promise<ServerVeri
     encrypted: isV2 ? true : undefined,
     error: valid ? undefined : "Signature verification failed.",
   };
+}
+
+// ── Signer extraction (lightweight, no crypto) ───────────────────────────
+
+/**
+ * Extract the signer's Ed25519 public key (base64url) from a raw attestation block.
+ * Returns null if the key cannot be extracted.
+ */
+export function extractSignerPublicKey(rawInput: string): string | null {
+  try {
+    const parsed = parseAttestationBlock(rawInput.trim());
+    const version = detectVersion(parsed);
+
+    if (version === "v3") {
+      const vc = parsed as unknown as { proof?: Array<{ verificationMethod?: string }> | { verificationMethod?: string } };
+      const proofs = Array.isArray(vc.proof) ? vc.proof : vc.proof ? [vc.proof] : [];
+      for (const proof of proofs) {
+        if (proof.verificationMethod?.startsWith("did:key:z")) {
+          const did = proof.verificationMethod.split("#")[0];
+          const { publicKey: pubKeyBytes } = decodeDIDKey(did);
+          return base64urlEncodeBytes(pubKeyBytes);
+        }
+      }
+      return null;
+    }
+
+    // v1/v2: publicKey field is base64url Ed25519
+    const attestation = parsed as { publicKey?: string };
+    return attestation.publicKey || null;
+  } catch {
+    return null;
+  }
+}
+
+function base64urlEncodeBytes(bytes: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────

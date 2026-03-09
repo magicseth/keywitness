@@ -40,6 +40,8 @@ export interface KeyWitnessCredentialSubject {
   keystrokeBiometricsHash: string;
   faceIdVerified?: boolean;
   appVersion?: string;
+  keystrokeCount?: number;
+  cleartextLength?: number;
 }
 
 export interface KeyWitnessVC {

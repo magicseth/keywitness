@@ -129,6 +129,231 @@ const result = await resp.json();</code></pre>
 </ul>
 <p>Share a verification URL and it automatically shows a rich preview with verification status.</p>
 
+<h2>Example: Form That Requires a Seal</h2>
+<p>This example shows a comment form that won't submit unless the text includes a valid KeyWitness attestation link. Once verified, it shows checkmarks for each verification aspect.</p>
+
+<div class="badge-demo">
+  <div id="demo-form-container">
+    <label style="display: block; color: #d1d5db; font-weight: 600; margin-bottom: 8px;">Post a verified comment</label>
+    <textarea id="demo-textarea" placeholder="Type your comment with the KeyWitness keyboard, tap Seal, then submit..." style="width: 100%; min-height: 100px; background: #0a0a0a; border: 1px solid #374151; border-radius: 8px; padding: 12px; color: #e5e7eb; font-size: 14px; resize: vertical; box-sizing: border-box;"></textarea>
+    <div id="demo-status" style="margin: 12px 0; min-height: 24px;"></div>
+    <button id="demo-submit" disabled style="padding: 8px 20px; background: #374151; color: #6b7280; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: not-allowed;">Submit (requires seal)</button>
+  </div>
+</div>
+
+<pre><code>&lt;script src="https://keywitness.io/embed.js"&gt;&lt;/script&gt;
+
+&lt;form id="verified-form"&gt;
+  &lt;textarea id="comment" placeholder="Type with KeyWitness keyboard, tap Seal..."&gt;&lt;/textarea&gt;
+  &lt;div id="verification-status"&gt;&lt;/div&gt;
+  &lt;button id="submit-btn" type="submit" disabled&gt;Submit (requires seal)&lt;/button&gt;
+&lt;/form&gt;
+
+&lt;script&gt;
+const textarea = document.getElementById('comment');
+const statusEl = document.getElementById('verification-status');
+const submitBtn = document.getElementById('submit-btn');
+
+let verifiedSnapshot = null; // text content when verification passed
+let stopWatching = null;     // stop function from watchById
+
+function resetForm() {
+  statusEl.innerHTML = '';
+  submitBtn.disabled = true;
+  submitBtn.style.background = '#374151';
+  submitBtn.style.color = '#6b7280';
+  submitBtn.style.cursor = 'not-allowed';
+  submitBtn.textContent = 'Submit (requires seal)';
+  verifiedSnapshot = null;
+  if (stopWatching) { stopWatching(); stopWatching = null; }
+}
+
+// SHA-256 hash the text the same way the iOS app does
+async function sha256Base64URL(text) {
+  const data = new TextEncoder().encode(text);
+  const hash = await crypto.subtle.digest('SHA-256', data);
+  const bytes = new Uint8Array(hash);
+  let binary = '';
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+// Extract the cleartext (text without the seal link)
+function extractCleartext(text, match) {
+  return text.replace(match[0], '').replace(/\s+$/, '');
+}
+
+async function handleResult(result, match) {
+  if (result.valid) {
+    // Verify the text in the form matches the sealed text
+    if (result.cleartextHash) {
+      const cleartext = extractCleartext(textarea.value, match);
+      const hash = await sha256Base64URL(cleartext);
+      if (hash !== result.cleartextHash) {
+        resetForm();
+        statusEl.innerHTML = '&lt;span style="color: #ef4444"&gt;'
+          + '&#x2717; Text doesn\\'t match seal — the sealed text is different from what\\'s in this form&lt;/span&gt;';
+        return;
+      }
+    }
+
+    // Snapshot the text so we can detect edits
+    verifiedSnapshot = textarea.value;
+
+    submitBtn.disabled = false;
+    submitBtn.style.background = '#22c55e';
+    submitBtn.style.color = '#fff';
+    submitBtn.style.cursor = 'pointer';
+    submitBtn.textContent = 'Submit';
+
+    const checks = [
+      { ok: result.valid, label: 'Signature' },
+      { ok: result.deviceVerified, label: 'Real device' },
+      { ok: result.biometricVerified, label: 'Face ID' },
+    ];
+    statusEl.innerHTML = checks.map(c =&gt;
+      `&lt;span style="margin-right: 12px; color: ${c.ok ? '#22c55e' : '#6b7280'}"&gt;`
+      + `${c.ok ? '&#x2713;' : '&amp;ndash;'} ${c.label}&lt;/span&gt;`
+    ).join('');
+  } else {
+    resetForm();
+    statusEl.innerHTML = '&lt;span style="color: #ef4444"&gt;&#x2717; Invalid seal&lt;/span&gt;';
+  }
+}
+
+textarea.addEventListener('input', () =&gt; {
+  // If text was edited after verification, invalidate
+  if (verifiedSnapshot !== null &amp;&amp; textarea.value !== verifiedSnapshot) {
+    resetForm();
+    statusEl.innerHTML = '&lt;span style="color: #ef4444"&gt;'
+      + '&#x2717; Text modified after seal — re-seal to submit&lt;/span&gt;';
+    return;
+  }
+
+  // Look for a KeyWitness link in the text
+  const match = textarea.value.match(
+    /(?:https?:\/\/)?keywitness\.io\/v\/([A-Za-z0-9]+)(?:#[A-Za-z0-9_-]+)?/
+  );
+  if (!match) { resetForm(); return; }
+  if (stopWatching) return; // already watching this seal
+
+  const shortId = match[1];
+  statusEl.innerHTML = '&lt;span style="color: #9ca3af"&gt;Verifying...&lt;/span&gt;';
+
+  // Start watching — polls every 3s, updates badges live as
+  // Face ID / device attestation data arrives on the server
+  stopWatching = KeyWitness.watchById(shortId, (result) =&gt; {
+    handleResult(result, match);
+  });
+});
+&lt;/script&gt;</code></pre>
+
+<p>The key parts:</p>
+<ul style="color: #9ca3af;">
+  <li>Watch the textarea for a <code>keywitness.io/v/...</code> link</li>
+  <li>Call <code>KeyWitness.watchById(shortId, callback)</code> to verify and poll for live updates (Face ID, device attestation) for 30 seconds</li>
+  <li>Hash the textarea text (minus the seal link) and compare against <code>result.cleartextHash</code> to verify the text matches what was sealed</li>
+  <li>Snapshot the text on successful verification — if the user edits it afterward, invalidate and require a new seal</li>
+  <li>Check <code>result.valid</code>, <code>result.deviceVerified</code>, <code>result.biometricVerified</code>, and <code>result.proofs</code></li>
+  <li>Only enable the submit button when the seal is valid and text matches the sealed content</li>
+</ul>
+
+<script src="/embed.js"></script>
+<script>
+(function() {
+  var textarea = document.getElementById('demo-textarea');
+  var statusEl = document.getElementById('demo-status');
+  var submitBtn = document.getElementById('demo-submit');
+  var verifiedSnapshot = null;
+  var stopWatching = null;
+
+  function resetDemo() {
+    statusEl.innerHTML = '';
+    submitBtn.disabled = true;
+    submitBtn.style.background = '#374151';
+    submitBtn.style.color = '#6b7280';
+    submitBtn.style.cursor = 'not-allowed';
+    submitBtn.textContent = 'Submit (requires seal)';
+    verifiedSnapshot = null;
+    if (stopWatching) { stopWatching(); stopWatching = null; }
+  }
+
+  async function sha256Base64URL(text) {
+    var data = new TextEncoder().encode(text);
+    var hash = await crypto.subtle.digest('SHA-256', data);
+    var bytes = new Uint8Array(hash);
+    var binary = '';
+    for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  }
+
+  function extractCleartext(text, match) {
+    return text.replace(match[0], '').replace(/\s+$/, '');
+  }
+
+  function showChecks(result) {
+    var checks = [
+      { ok: result.valid, label: 'Signature' },
+      { ok: result.deviceVerified, label: 'Real device' },
+      { ok: result.biometricVerified, label: 'Face ID' },
+    ];
+    statusEl.innerHTML = checks.map(function(c) {
+      return '<span style="margin-right: 12px; font-size: 13px; color: '
+        + (c.ok ? '#22c55e' : '#6b7280') + '">'
+        + (c.ok ? '&#x2713;' : '&ndash;') + ' ' + c.label + '</span>';
+    }).join('');
+  }
+
+  async function handleDemoResult(result, match) {
+    if (result.valid) {
+      if (result.cleartextHash) {
+        var cleartext = extractCleartext(textarea.value, match);
+        var hash = await sha256Base64URL(cleartext);
+        if (hash !== result.cleartextHash) {
+          resetDemo();
+          statusEl.innerHTML = '<span style="color: #ef4444">&#x2717; Text doesn\'t match seal &mdash; the sealed text is different from what\'s in this form</span>';
+          return;
+        }
+      }
+      verifiedSnapshot = textarea.value;
+      submitBtn.disabled = false;
+      submitBtn.style.background = '#22c55e';
+      submitBtn.style.color = '#fff';
+      submitBtn.style.cursor = 'pointer';
+      submitBtn.textContent = 'Submit';
+      showChecks(result);
+    } else {
+      resetDemo();
+      statusEl.innerHTML = '<span style="color: #ef4444">&#x2717; Invalid seal</span>';
+    }
+  }
+
+  textarea.addEventListener('input', function() {
+    if (verifiedSnapshot !== null && textarea.value !== verifiedSnapshot) {
+      resetDemo();
+      statusEl.innerHTML = '<span style="color: #ef4444">&#x2717; Text modified after seal &mdash; re-seal to submit</span>';
+      return;
+    }
+
+    var match = textarea.value.match(/(?:https?:\/\/)?keywitness\.io\/v\/([A-Za-z0-9]+)(?:#[A-Za-z0-9_-]+)?/);
+    if (!match) { resetDemo(); return; }
+    if (stopWatching) return;
+
+    var shortId = match[1];
+    statusEl.innerHTML = '<span style="color: #9ca3af">Verifying...</span>';
+    stopWatching = KeyWitness.watchById(shortId, function(result) {
+      handleDemoResult(result, match);
+    });
+  });
+
+  submitBtn.addEventListener('click', function() {
+    if (!submitBtn.disabled) {
+      alert('Comment submitted with verified seal!');
+    }
+  });
+})();
+</script>
+
 <h2>Content Security Policy</h2>
 <p>If your site uses CSP headers, add:</p>
 <pre><code>frame-src https://keywitness.io;

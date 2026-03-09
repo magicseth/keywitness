@@ -80,6 +80,30 @@ const KeyWitness = {
   },
 
   /**
+   * Watch an attestation for live updates (polls every `interval` ms).
+   * Calls `onChange` whenever the result changes. Stops after `timeout` ms (default 30s).
+   * Returns a stop function.
+   */
+  watchById(shortId: string, onChange: (result: VerifyResult) => void, interval = 3000, timeout = 30000): () => void {
+    let stopped = false;
+    let last = "";
+    const deadline = Date.now() + timeout;
+    const stop = () => { stopped = true; };
+    const poll = async () => {
+      if (stopped || Date.now() > deadline) return;
+      try {
+        const resp = await fetch(`${API}/verify?id=${encodeURIComponent(shortId)}`);
+        const result: VerifyResult = await resp.json();
+        const key = JSON.stringify(result);
+        if (key !== last) { last = key; onChange(result); }
+      } catch { /* ignore transient errors */ }
+      if (!stopped && Date.now() <= deadline) setTimeout(poll, interval);
+    };
+    poll();
+    return stop;
+  },
+
+  /**
    * Render a verification badge inside a target element.
    */
   badge(target: HTMLElement | string, shortId: string, options?: BadgeOptions): BadgeHandle {
