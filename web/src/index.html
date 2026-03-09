@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KeyWitness - Cryptographic Text Verification</title>
+    <meta
+      name="description"
+      content="Verify that text was cryptographically signed by a specific device-bound Ed25519 key with keystroke biometrics."
+    />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="container">
+      <!-- Header -->
+      <header>
+        <h1>Key<span class="accent">Witness</span></h1>
+        <p class="subtitle">
+          Verify that text was cryptographically signed by a device-bound
+          Ed25519 key with keystroke biometrics attestation.
+        </p>
+      </header>
+
+      <!-- Verification input -->
+      <section class="verify-section">
+        <label for="attestation-input">Paste attestation</label>
+        <textarea
+          id="attestation-input"
+          placeholder="-----BEGIN KEYWITNESS ATTESTATION-----&#10;...base64url encoded attestation...&#10;-----END KEYWITNESS ATTESTATION-----"
+          spellcheck="false"
+          autocomplete="off"
+        ></textarea>
+        <button id="verify-btn" class="btn-verify" type="button">
+          Verify
+        </button>
+      </section>
+
+      <!-- Results -->
+      <div id="results" class="results">
+        <!-- Status banner -->
+        <div id="status-banner" class="status-banner">
+          <span id="status-dot" class="status-dot"></span>
+          <span id="status-text"></span>
+        </div>
+
+        <!-- Error display -->
+        <div id="error-container" style="display: none">
+          <div id="error-message" class="error-message"></div>
+        </div>
+
+        <!-- Detail fields -->
+        <div id="result-details" class="result-details" style="display: none">
+          <div class="result-field">
+            <span class="field-label">Signed cleartext</span>
+            <span id="field-cleartext" class="field-value cleartext"></span>
+          </div>
+          <div class="result-field">
+            <span class="field-label">Device ID</span>
+            <span id="field-device-id" class="field-value"></span>
+          </div>
+          <div class="result-field">
+            <span class="field-label">Timestamp</span>
+            <span id="field-timestamp" class="field-value"></span>
+          </div>
+          <div class="result-field">
+            <span class="field-label">Public key fingerprint</span>
+            <span id="field-fingerprint" class="field-value"></span>
+          </div>
+          <div class="result-field">
+            <span class="field-label">Keystroke biometrics hash</span>
+            <span id="field-biometrics" class="field-value"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- What this proves -->
+      <section class="info-section proves">
+        <h2>What this proves</h2>
+        <ul>
+          <li>
+            The cleartext was signed by the holder of a specific Ed25519 private
+            key, identified by the public key fingerprint shown above.
+          </li>
+          <li>
+            The signing key is bound to a particular device and was generated
+            inside the KeyWitness keyboard.
+          </li>
+          <li>
+            The text has not been modified since it was signed &mdash; any
+            alteration would invalidate the signature.
+          </li>
+          <li>
+            A keystroke biometrics hash was captured at signing time, providing
+            an additional behavioral signal tied to the typist.
+          </li>
+        </ul>
+      </section>
+
+      <!-- What this does NOT prove -->
+      <section class="info-section does-not-prove">
+        <h2>What this does NOT prove</h2>
+        <ul>
+          <li>
+            <strong>Identity:</strong> The signature proves key possession, not
+            who holds the key. You must independently verify that the public key
+            belongs to the person you expect (standard PKI trust model).
+          </li>
+          <li>
+            <strong>Content truth:</strong> The text is proven authentic (it was
+            really signed), but the claims within it may still be false.
+          </li>
+          <li>
+            <strong>Time accuracy:</strong> The timestamp is set by the signing
+            device. A compromised device could backdate or forward-date it.
+          </li>
+          <li>
+            <strong>Biometric identity:</strong> The keystroke hash is a
+            behavioral fingerprint, not a verified biometric identity.
+          </li>
+        </ul>
+      </section>
+
+      <!-- Footer -->
+      <footer>
+        <p>
+          <strong>KeyWitness</strong> &mdash; Cryptographic text attestation
+          with device-bound keys.
+        </p>
+        <p>
+          All verification is performed client-side. No data leaves your
+          browser.
+        </p>
+        <p>
+          <a
+            href="https://github.com/user/keywitness"
+            target="_blank"
+            rel="noopener"
+            >GitHub</a
+          >
+        </p>
+      </footer>
+    </div>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
