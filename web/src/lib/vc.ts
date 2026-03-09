@@ -274,10 +274,12 @@ export async function verifyVC(credential: KeyWitnessVC): Promise<VCVerification
     } else if (proof.type === "AppleAppAttestProof") {
       results.push(await verifyAppAttestProof(proof));
     } else {
+      // Defensive: handle unexpected proof types from future protocol versions
+      const unknownProof: { type?: string; proofType?: string } = proof;
       results.push({
-        proofType: (proof as unknown as Record<string, string>).proofType || "unknown",
+        proofType: unknownProof.proofType || "unknown",
         valid: false,
-        error: `Unknown proof type: ${(proof as unknown as Record<string, string>).type}`,
+        error: `Unknown proof type: ${unknownProof.type}`,
       });
     }
   }

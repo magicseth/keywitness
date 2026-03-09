@@ -170,5 +170,10 @@ if (document.readyState === "loading") {
   KeyWitness.autoRender();
 }
 
-(window as unknown as Record<string, unknown>).KeyWitness = KeyWitness;
+declare global {
+  interface Window {
+    KeyWitness: typeof KeyWitness;
+  }
+}
+window.KeyWitness = KeyWitness;
 export default KeyWitness;
