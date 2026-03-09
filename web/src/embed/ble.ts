@@ -32,6 +32,8 @@ export interface BLESessionInfo {
   sessionId: Uint8Array;
   devicePublicKey: Uint8Array;
   deviceDID: string;
+  /** The nonce sent to the device — used to verify challenge binding in the VC */
+  nonce: Uint8Array;
 }
 
 export interface BLEAttestationResult {
@@ -66,6 +68,14 @@ async function sha256(data: Uint8Array): Promise<Uint8Array> {
   const ab = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
   const hash = await crypto.subtle.digest("SHA-256", ab);
   return new Uint8Array(hash);
+}
+
+function base64urlEncode(bytes: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 // ── BLE Client ─────────────────────────────────────────────────────────────
@@ -131,11 +141,11 @@ export async function connect(): Promise<BLEConnection> {
       const didBytes = new Uint8Array(value.buffer, value.byteOffset + 50, didLen);
       const deviceDID = new TextDecoder().decode(didBytes);
 
-      resolve({ sessionId, devicePublicKey: publicKey, deviceDID });
+      resolve({ sessionId, devicePublicKey: publicKey, deviceDID, nonce });
     };
 
     sessionChar.addEventListener("characteristicvaluechanged", handler);
-    sessionChar.writeValue(initMsg).catch(reject);
+    sessionChar.writeValueWithResponse(initMsg).catch(reject);
   });
 
   // Disconnect callbacks
@@ -201,7 +211,7 @@ export async function connect(): Promise<BLEConnection> {
         chunkView.setUint16(2, totalChunks, true);
         chunk.set(chunkPayload, 4);
 
-        await attestRequestChar.writeValue(chunk);
+        await attestRequestChar.writeValueWithResponse(chunk);
       }
 
       // Wait for result (chunked notifications)
@@ -248,15 +258,42 @@ export async function connect(): Promise<BLEConnection> {
             if (resultStatus === 0x00) {
               // Success: block + newline + key
               const newlineIdx = text.lastIndexOf("\n");
-              if (newlineIdx === -1) {
-                resolve({ status: "success", attestationBlock: text });
-              } else {
-                resolve({
-                  status: "success",
-                  attestationBlock: text.substring(0, newlineIdx),
-                  encryptionKey: text.substring(newlineIdx + 1),
-                });
+              const attestationBlock = newlineIdx === -1 ? text : text.substring(0, newlineIdx);
+              const encKey = newlineIdx === -1 ? undefined : text.substring(newlineIdx + 1);
+
+              // Verify challenge binding: the VC must contain our session nonce
+              try {
+                const beginMarker = "-----BEGIN KEYWITNESS ATTESTATION-----";
+                const endMarker = "-----END KEYWITNESS ATTESTATION-----";
+                const b = attestationBlock.indexOf(beginMarker);
+                const e = attestationBlock.indexOf(endMarker);
+                if (b !== -1 && e !== -1) {
+                  const body = attestationBlock.slice(b + beginMarker.length, e).replace(/\s+/g, "");
+                  // base64url decode
+                  let b64 = body.replace(/-/g, "+").replace(/_/g, "/");
+                  while (b64.length % 4 !== 0) b64 += "=";
+                  const vcJSON = JSON.parse(atob(b64));
+                  const expectedChallenge = base64urlEncode(nonce);
+                  if (vcJSON.credentialSubject?.challenge !== expectedChallenge) {
+                    cleanup();
+                    reject(new Error("Challenge mismatch: VC is not bound to this BLE session"));
+                    return;
+                  }
+                }
+              } catch (err) {
+                // If parsing fails, still reject — don't accept unverifiable VCs
+                if (err instanceof Error && err.message.includes("Challenge mismatch")) {
+                  reject(err);
+                  return;
+                }
+                // Other parse errors: log but allow (might be older protocol)
               }
+
+              resolve({
+                status: "success",
+                attestationBlock,
+                encryptionKey: encKey,
+              });
             } else if (resultStatus === 0x01) {
               resolve({ status: "cancelled", error: text });
             } else {

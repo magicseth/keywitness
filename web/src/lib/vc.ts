@@ -71,6 +71,8 @@ export interface KeyWitnessCredentialSubject {
   /** App version that created this attestation */
   appVersion?: string;
   cleartextLength?: number;
+  /** Session challenge (e.g. BLE nonce) binding this VC to a specific session */
+  challenge?: string;
 }
 
 /** W3C BitstringStatusListEntry for credential revocation */
@@ -298,19 +300,40 @@ export async function verifyVC(credential: KeyWitnessVC): Promise<VCVerification
   const primaryProof = results.find((r) => r.proofType === "keystrokeAttestation" || r.proofType === "voiceAttestation" || r.proofType === "photoAttestation");
   const overallValid = primaryProof?.valid ?? false;
 
-  // Extract raw public key from did:key for backward compat
+  // SECURITY: Derive publicKey from the proof's verificationMethod (the actual signer),
+  // NOT from credential.issuer. An attacker could set issuer to a victim's DID while
+  // signing with their own key — the signature would verify but attribution would be wrong.
   let publicKey: string | undefined;
-  try {
-    const { publicKey: pkBytes } = decodeDIDKey(credential.issuer);
-    // base64url encode
-    let binary = "";
-    for (let i = 0; i < pkBytes.length; i++) {
-      binary += String.fromCharCode(pkBytes[i]);
+  let signerDID: string | undefined;
+  const dataIntegrityProof = proofs.find(
+    (p): p is DataIntegrityProof => p.type === "DataIntegrityProof" && (p as DataIntegrityProof).cryptosuite === "eddsa-jcs-2022"
+  );
+  if (dataIntegrityProof) {
+    try {
+      signerDID = dataIntegrityProof.verificationMethod.split("#")[0];
+      const { publicKey: pkBytes } = decodeDIDKey(signerDID);
+      let binary = "";
+      for (let i = 0; i < pkBytes.length; i++) {
+        binary += String.fromCharCode(pkBytes[i]);
+      }
+      publicKey = btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    } catch {
+      publicKey = credential.publicKey;
     }
-    publicKey = btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-  } catch {
-    // If issuer is not a valid did:key, try the legacy publicKey field
-    publicKey = credential.publicKey;
+  }
+
+  // Verify issuer matches the actual signer — reject if they diverge
+  if (overallValid && signerDID && credential.issuer !== signerDID) {
+    return {
+      valid: false,
+      version: "v3",
+      issuer: credential.issuer,
+      validFrom: credential.validFrom,
+      credentialSubject: credential.credentialSubject,
+      proofs: results,
+      publicKey,
+      error: "Issuer DID does not match proof signer — possible impersonation attempt",
+    };
   }
 
   return {

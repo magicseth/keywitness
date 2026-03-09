@@ -7,6 +7,23 @@ import { api } from "./_generated/api";
 
 const http = httpRouter();
 
+// ── Helper: resolve attestation text from doc (inline or file storage) ───────
+
+async function resolveAttestationText(
+  ctx: { storage: { getUrl(id: any): Promise<string | null> } },
+  doc: { attestation?: string | null; attestationStorageId?: any },
+): Promise<string | null> {
+  if (doc.attestation) return doc.attestation;
+  if (doc.attestationStorageId) {
+    const url = await ctx.storage.getUrl(doc.attestationStorageId);
+    if (url) {
+      const resp = await fetch(url);
+      if (resp.ok) return await resp.text();
+    }
+  }
+  return null;
+}
+
 // ── Attestation API ──────────────────────────────────────────────────────────
 
 // POST /api/attestations - upload an attestation (called by iOS keyboard)
@@ -49,8 +66,32 @@ http.route({
       }
     }
 
+    // For large attestations (photos >256KB), store in file storage
+    const attestationStr: string = body.attestation;
+    const isLarge = attestationStr.length > 256 * 1024;
+    let storageId: string | undefined;
+
+    if (isLarge) {
+      // Store in Convex file storage
+      const uploadUrl = await ctx.storage.generateUploadUrl();
+      const uploadResp = await fetch(uploadUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: attestationStr,
+      });
+      if (!uploadResp.ok) {
+        return new Response(JSON.stringify({ error: "Failed to store large attestation" }), {
+          status: 500,
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+        });
+      }
+      const { storageId: sid } = await uploadResp.json();
+      storageId = sid;
+    }
+
     const result = await ctx.runMutation(api.attestations.upload, {
-      attestation: body.attestation,
+      attestation: isLarge ? undefined : attestationStr,
+      attestationStorageId: storageId,
       deviceVerified: deviceVerified || undefined,
       username,
       usernameSeq,
@@ -237,7 +278,8 @@ http.route({
           headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
         });
       }
-      const attestationSigner = extractSignerPublicKey(doc.attestation);
+      const attestationText = await resolveAttestationText(ctx, doc);
+      const attestationSigner = attestationText ? extractSignerPublicKey(attestationText) : null;
       if (attestationSigner && body.publicKey && attestationSigner !== body.publicKey) {
         return new Response(JSON.stringify({ error: "Biometric key does not match attestation signer" }), {
           status: 403,
@@ -584,7 +626,14 @@ http.route({
     }
 
     // Cryptographically verify the attestation before returning labels
-    const verifyResult = await verifyAttestationServerSide(doc.attestation);
+    const attestText = await resolveAttestationText(ctx, doc);
+    if (!attestText) {
+      return new Response(JSON.stringify({ error: "Attestation content unavailable" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      });
+    }
+    const verifyResult = await verifyAttestationServerSide(attestText);
     if (!verifyResult.valid) {
       return new Response(JSON.stringify({
         shortId,
@@ -665,7 +714,7 @@ http.route({
         attestedAt: new Date(doc.createdAt).toISOString(),
         deviceVerified: !!doc.deviceVerified,
         biometricVerified: !!doc.biometricSignature,
-        attestation: doc.attestation,
+        attestation: doc.attestation || (doc.attestationUrl ? "[stored in file storage]" : undefined),
       },
     };
 
@@ -711,7 +760,7 @@ http.route({
       "iss": "https://keywitness.io",
       "sub": shortId,
       "iat": Math.floor(doc.createdAt / 1000),
-      "keywitness:attestation": doc.attestation,
+      "keywitness:attestation": doc.attestation || (doc.attestationUrl ? "[stored in file storage]" : undefined),
       "keywitness:device-verified": !!doc.deviceVerified,
       "keywitness:biometric-verified": !!doc.biometricSignature,
       "keywitness:verification-url": `https://keywitness.io/v/${shortId}`,
@@ -931,7 +980,19 @@ http.route({
       });
     }
 
-    const result = await verifyAttestationServerSide(doc.attestation);
+    // Resolve attestation text (inline or from storage)
+    let attestationForVerify = doc.attestation;
+    if (!attestationForVerify && doc.attestationUrl) {
+      const storageResp = await fetch(doc.attestationUrl);
+      if (storageResp.ok) attestationForVerify = await storageResp.text();
+    }
+    if (!attestationForVerify) {
+      return new Response(JSON.stringify({ error: "Attestation content unavailable" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      });
+    }
+    const result = await verifyAttestationServerSide(attestationForVerify);
     const origin = new URL(request.url).origin;
 
     return new Response(JSON.stringify({

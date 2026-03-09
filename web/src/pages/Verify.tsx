@@ -290,8 +290,19 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
 
   useEffect(() => {
     if (attestationDoc?.attestation) {
-      setInput(attestationDoc.attestation);
-      handleVerify(attestationDoc.attestation);
+      // If attestation is in file storage, fetch it first
+      if (attestationDoc.attestationUrl && !attestationDoc.attestation) {
+        fetch(attestationDoc.attestationUrl)
+          .then((r) => r.text())
+          .then((text) => {
+            setInput(text);
+            handleVerify(text);
+          })
+          .catch(() => {});
+      } else {
+        setInput(attestationDoc.attestation);
+        handleVerify(attestationDoc.attestation);
+      }
     }
   }, [attestationDoc, handleVerify]);
 
@@ -307,9 +318,13 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
     : null;
 
   const writerName = keyRecord ? keyRecord.name : knownKeyName;
-  const hasDeviceVerification = !!attestationDoc?.deviceVerified;
-  const hasFaceId = !!attestationDoc?.biometricSignature;
+  // Use DB-verified status when available, fall back to VC claims for pasted attestations
+  const hasDeviceVerification = !!attestationDoc?.deviceVerified || !!result?.appAttestPresent;
+  const hasFaceId = !!attestationDoc?.biometricSignature || !!result?.faceIdVerified;
   const hasKeystrokeData = !!(result?.keystrokeTimings && result.keystrokeTimings.length > 0);
+  // Even without decrypted timings, keystroke proof is present if the VC has keystroke data
+  const hasKeystrokeProof = hasKeystrokeData
+    || !!(result?.proofs?.some((p) => p.proofType === "keystrokeAttestation" && p.valid));
   const isVoice = result?.attestationType === "spoken";
   const isPhoto = result?.attestationType === "photo";
 
@@ -320,13 +335,36 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
 
         {/* ── No result yet: show landing ── */}
         {!result && !verifying && (
-          <div className="text-center py-20">
-            <h1 className="text-4xl font-bold tracking-tight text-white mb-3">
-              Was this written by a real person?
-            </h1>
-            <p className="text-gray-400 text-lg mb-2">
-              Paste a KeyWitness attestation below to find out.
-            </p>
+          <div className="py-20">
+            <div className="text-center mb-8">
+              <h1 className="text-4xl font-bold tracking-tight text-white mb-3">
+                Was this written by a real person?
+              </h1>
+              <p className="text-gray-400 text-lg">
+                Paste a KeyWitness attestation below to find out.
+              </p>
+            </div>
+            <textarea
+              className="w-full h-32 bg-[#111] border border-gray-800 rounded-xl p-4 font-mono text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-gray-600 focus:ring-1 focus:ring-gray-600 resize-y mb-3"
+              placeholder="-----BEGIN KEYWITNESS ATTESTATION-----&#10;...&#10;-----END KEYWITNESS ATTESTATION-----"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault();
+                  onVerifyClick();
+                }
+              }}
+            />
+            <div className="flex justify-end">
+              <button
+                onClick={onVerifyClick}
+                disabled={verifying || !input.trim()}
+                className="px-5 py-2 bg-white text-black text-sm font-semibold rounded-lg hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Verify
+              </button>
+            </div>
           </div>
         )}
 
@@ -485,8 +523,8 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
                       </svg>
                       Verified
                     </span>
-                    <span className={(hasKeystrokeData || isVoice || isPhoto) ? "text-green-500/50" : ""}>
-                      {(hasKeystrokeData || isVoice || isPhoto) ? "\u2713" : "\u2013"} {isPhoto ? "Camera Capture" : isVoice ? "Voice" : "Keystrokes"}
+                    <span className={(hasKeystrokeProof || isVoice || isPhoto) ? "text-green-500/50" : ""}>
+                      {(hasKeystrokeProof || isVoice || isPhoto) ? "\u2713" : "\u2013"} {isPhoto ? "Camera Capture" : isVoice ? "Voice" : "Keystrokes"}
                     </span>
                     <span className={hasDeviceVerification ? "text-green-500/50" : ""}>
                       {hasDeviceVerification ? "\u2713" : "\u2013"} Device
@@ -520,7 +558,7 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
                       )}
                     </p>
                   )}
-                  {hasKeystrokeData && !isVoice && !isPhoto && (
+                  {hasKeystrokeProof && !isVoice && !isPhoto && (
                     <p>
                       <span className="text-green-400 font-medium">Keystrokes verified</span> — this text was typed by hand on a keyboard, not pasted or generated. The typing rhythm and finger positions are recorded in the seal.
                     </p>
@@ -536,7 +574,7 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
                       {attestationDoc?.biometricTimestamp ? ` ${Math.round((attestationDoc.biometricTimestamp - attestationDoc.createdAt) / 1000)} seconds after typing` : ""}.
                     </p>
                   )}
-                  {!hasKeystrokeData && !isVoice && !isPhoto && !hasDeviceVerification && !hasFaceId && (
+                  {!hasKeystrokeProof && !isVoice && !isPhoto && !hasDeviceVerification && !hasFaceId && (
                     <p>The cryptographic signature is valid — the text hasn't been modified since it was signed.</p>
                   )}
                 </div>

@@ -27,24 +27,34 @@ async function sha256Hex(data: string): Promise<string> {
     .join("");
 }
 
-/** Max attestation size: 256KB. */
-const MAX_ATTESTATION_SIZE = 256 * 1024;
+/** Max inline attestation size: 256KB. Larger ones use file storage. */
+const MAX_INLINE_SIZE = 256 * 1024;
 
 export const upload = mutation({
   args: {
-    attestation: v.string(),
+    attestation: v.optional(v.string()),
+    attestationStorageId: v.optional(v.string()),
     deviceVerified: v.optional(v.boolean()),
     username: v.optional(v.string()),
     usernameSeq: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    // Size limit
-    if (args.attestation.length > MAX_ATTESTATION_SIZE) {
-      throw new Error("Attestation too large (max 256KB)");
+    const attestationText = args.attestation;
+
+    // Must have either inline or storage-based attestation
+    if (!attestationText && !args.attestationStorageId) {
+      throw new Error("Missing attestation data");
     }
 
-    // Content-hash dedup — reject duplicate attestations
-    const attestationHash = await sha256Hex(args.attestation);
+    // Size limit for inline attestations
+    if (attestationText && attestationText.length > MAX_INLINE_SIZE) {
+      throw new Error("Attestation too large for inline storage (max 256KB). Use file storage.");
+    }
+
+    // Content-hash dedup
+    const attestationHash = attestationText
+      ? await sha256Hex(attestationText)
+      : args.attestationStorageId ? await sha256Hex(args.attestationStorageId) : undefined;
     const existing = await ctx.db
       .query("attestations")
       .withIndex("by_attestationHash", (q) => q.eq("attestationHash", attestationHash))
@@ -91,7 +101,8 @@ export const upload = mutation({
 
     await ctx.db.insert("attestations", {
       shortId,
-      attestation: args.attestation,
+      attestation: attestationText,
+      attestationStorageId: args.attestationStorageId as any,
       attestationHash,
       createdAt: Date.now(),
       deviceVerified: args.deviceVerified || undefined,
@@ -115,8 +126,17 @@ export const getByShortId = query({
       .withIndex("by_shortId", (q) => q.eq("shortId", args.shortId))
       .first();
     if (!doc) return null;
+
+    // For large attestations stored in file storage, return the URL
+    let attestation = doc.attestation ?? undefined;
+    let attestationUrl: string | undefined;
+    if (!attestation && doc.attestationStorageId) {
+      attestationUrl = await ctx.storage.getUrl(doc.attestationStorageId) ?? undefined;
+    }
+
     return {
-      attestation: doc.attestation,
+      attestation,
+      attestationUrl,
       createdAt: doc.createdAt,
       biometricSignature: doc.biometricSignature,
       biometricPublicKey: doc.biometricPublicKey,

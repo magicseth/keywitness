@@ -6,7 +6,9 @@ export default defineSchema({
 
   attestations: defineTable({
     shortId: v.string(),
-    attestation: v.string(),
+    attestation: v.optional(v.string()),
+    /** For large attestations (photos), stored in Convex file storage */
+    attestationStorageId: v.optional(v.id("_storage")),
     /** SHA-256 hex hash of the attestation content for dedup */
     attestationHash: v.optional(v.string()),
     createdAt: v.number(),

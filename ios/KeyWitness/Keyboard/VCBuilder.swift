@@ -19,7 +19,8 @@ final class VCBuilder {
                          faceIdVerified: Bool,
                          appAttestKeyId: String? = nil,
                          appAttestAssertion: String? = nil,
-                         appAttestClientData: String? = nil) throws -> (block: String, encryptionKey: String) {
+                         appAttestClientData: String? = nil,
+                         challenge: String? = nil) throws -> (block: String, encryptionKey: String) {
 
         let deviceId = AttestationBuilder.deviceIdentifier()
         let timestamp = AttestationBuilder.iso8601Timestamp()
@@ -64,6 +65,11 @@ final class VCBuilder {
             "keystrokeCount": keystrokeEvents.count,
             "cleartextLength": cleartext.count,
         ]
+
+        // Bind to a specific session challenge (e.g. BLE nonce) to prevent replay
+        if let challenge = challenge {
+            credentialSubject["challenge"] = challenge
+        }
 
         // Build the credential (without proof)
         var credential: [String: Any] = [

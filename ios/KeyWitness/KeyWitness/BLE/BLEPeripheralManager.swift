@@ -11,6 +11,8 @@ protocol BLEPeripheralDelegate: AnyObject {
     func bleAttestationRequested(_ session: BLESession, cleartext: String, cleartextHash: Data)
     /// Called when the session ends (disconnect or completion).
     func bleSessionEnded()
+    /// Called when advertising actually starts (or fails).
+    func bleAdvertisingStateChanged(advertising: Bool, error: String?)
 }
 
 /// CoreBluetooth peripheral that advertises the KeyWitness attestation service.
@@ -30,6 +32,14 @@ final class BLEPeripheralManager: NSObject {
 
     private(set) var isAdvertising = false
 
+    /// User wants to advertise — set when toggle is on.
+    /// Actual advertising starts when both this is true AND the service is registered.
+    private var wantsToAdvertise = false
+    private var serviceRegistered = false
+
+    /// Queue of chunks waiting to be sent when the transmit buffer has space.
+    private var pendingChunks: [(data: Data, central: CBCentral)] = []
+
     override init() {
         super.init()
         peripheralManager = CBPeripheralManager(delegate: self, queue: .main)
@@ -38,29 +48,41 @@ final class BLEPeripheralManager: NSObject {
     // MARK: - Public API
 
     func startAdvertising() {
+        wantsToAdvertise = true
+
         guard peripheralManager.state == .poweredOn else {
-            NSLog("[BLE] Cannot advertise: Bluetooth not powered on (state=%d)", peripheralManager.state.rawValue)
+            NSLog("[BLE] Bluetooth not powered on yet (state=%d), will advertise when ready", peripheralManager.state.rawValue)
             return
         }
-        guard !isAdvertising else { return }
 
+        // Add service if not yet added
         if service == nil {
             setupService()
+            // Advertising will start in didAdd callback
+            return
         }
 
-        peripheralManager.startAdvertising([
-            CBAdvertisementDataServiceUUIDsKey: [BLEConstants.serviceUUID],
-            CBAdvertisementDataLocalNameKey: BLEConstants.localName,
-        ])
-        isAdvertising = true
-        NSLog("[BLE] Started advertising")
+        // Service already registered, start now
+        if serviceRegistered && !isAdvertising {
+            beginAdvertising()
+        }
     }
 
     func stopAdvertising() {
+        wantsToAdvertise = false
         peripheralManager.stopAdvertising()
         isAdvertising = false
         activeSession = nil
         NSLog("[BLE] Stopped advertising")
+    }
+
+    private func beginAdvertising() {
+        guard !isAdvertising else { return }
+        peripheralManager.startAdvertising([
+            CBAdvertisementDataServiceUUIDsKey: [BLEConstants.serviceUUID],
+            CBAdvertisementDataLocalNameKey: BLEConstants.localName,
+        ])
+        NSLog("[BLE] Requested start advertising")
     }
 
     /// Send the attestation result back to the web browser over BLE.
@@ -92,14 +114,57 @@ final class BLEPeripheralManager: NSObject {
             // Header: [status:1] [totalChunks:2] [chunkIndex:2] [payload:N]
             var chunk = Data()
             chunk.append(result.status.rawValue)
-            chunk.append(contentsOf: withUnsafeBytes(of: totalChunks.littleEndian) { Array($0) })
-            chunk.append(contentsOf: withUnsafeBytes(of: i.littleEndian) { Array($0) })
+            var totalLE = totalChunks.littleEndian
+            chunk.append(Data(bytes: &totalLE, count: 2))
+            var indexLE = i.littleEndian
+            chunk.append(Data(bytes: &indexLE, count: 2))
             chunk.append(chunkPayload)
 
-            peripheralManager.updateValue(chunk, for: characteristic, onSubscribedCentrals: [session.central])
+            let sent = peripheralManager.updateValue(chunk, for: characteristic, onSubscribedCentrals: [session.central])
+            if !sent {
+                // Queue is full — buffer remaining chunks for peripheralManagerIsReady
+                NSLog("[BLE] Transmit queue full at chunk %d/%d, queuing remainder", i, totalChunks)
+                pendingChunks.append((data: chunk, central: session.central))
+                // Queue the rest too
+                for j in (Int(i) + 1)..<Int(totalChunks) {
+                    let s = j * chunkSize
+                    let e = min(s + chunkSize, payload.count)
+                    let cp = payload[s..<e]
+                    var c = Data()
+                    c.append(result.status.rawValue)
+                    var tLE = totalChunks.littleEndian
+                    c.append(Data(bytes: &tLE, count: 2))
+                    var jLE = UInt16(j).littleEndian
+                    c.append(Data(bytes: &jLE, count: 2))
+                    c.append(cp)
+                    pendingChunks.append((data: c, central: session.central))
+                }
+                NSLog("[BLE] Queued %d chunks total", pendingChunks.count)
+                return
+            } else {
+                NSLog("[BLE] Sent chunk %d/%d (%d bytes)", i + 1, totalChunks, chunk.count)
+            }
         }
 
-        NSLog("[BLE] Sent attestation result: status=%d, chunks=%d", result.status.rawValue, totalChunks)
+        NSLog("[BLE] All %d chunks sent successfully", totalChunks)
+    }
+
+    /// Drain the pending chunk queue when the transmit buffer has space.
+    private func drainPendingChunks() {
+        guard let characteristic = attestResultCharacteristic else { return }
+
+        while !pendingChunks.isEmpty {
+            let next = pendingChunks[0]
+            let sent = peripheralManager.updateValue(next.data, for: characteristic, onSubscribedCentrals: [next.central])
+            if sent {
+                pendingChunks.removeFirst()
+                NSLog("[BLE] Drained queued chunk (%d remaining)", pendingChunks.count)
+            } else {
+                NSLog("[BLE] Queue still full, %d chunks remaining", pendingChunks.count)
+                return // Will be called again from peripheralManagerIsReady
+            }
+        }
+        NSLog("[BLE] All queued chunks drained")
     }
 
     // MARK: - Service Setup
@@ -147,7 +212,7 @@ final class BLEPeripheralManager: NSObject {
 
         peripheralManager.add(svc)
         service = svc
-        NSLog("[BLE] Service configured with 4 characteristics")
+        NSLog("[BLE] Service setup requested (waiting for didAdd callback)")
     }
 
     // MARK: - Message Parsing
@@ -213,9 +278,10 @@ final class BLEPeripheralManager: NSObject {
         let keyData = data[2..<(2 + keyLen)]
         let key = String(data: keyData, encoding: .utf8) ?? "?"
 
+        // Read UInt32 values byte-by-byte to avoid alignment issues
         let downOffset = 2 + keyLen
-        let downAt = data[downOffset..<(downOffset + 4)].withUnsafeBytes { $0.load(as: UInt32.self).littleEndian }
-        let upAt = data[(downOffset + 4)..<(downOffset + 8)].withUnsafeBytes { $0.load(as: UInt32.self).littleEndian }
+        let downAt = readUInt32LE(data, offset: downOffset)
+        let upAt = readUInt32LE(data, offset: downOffset + 4)
 
         let event = BLEKeystrokeEvent(key: key, downAtMs: downAt, upAtMs: upAt)
         session.keystrokeEvents.append(event)
@@ -229,8 +295,8 @@ final class BLEPeripheralManager: NSObject {
         // [chunkIndex:2] [totalChunks:2] [payload:N]
         guard data.count >= 4 else { return }
 
-        let chunkIndex = data[0..<2].withUnsafeBytes { $0.load(as: UInt16.self).littleEndian }
-        let totalChunks = data[2..<4].withUnsafeBytes { $0.load(as: UInt16.self).littleEndian }
+        let chunkIndex = readUInt16LE(data, offset: 0)
+        let totalChunks = readUInt16LE(data, offset: 2)
         let payload = data[4...]
 
         attestRequestBuffer.add(index: chunkIndex, total: totalChunks, payload: Data(payload))
@@ -244,12 +310,12 @@ final class BLEPeripheralManager: NSObject {
         // Parse: [0x20] [sessionId:16] [cleartextHash:32] [cleartextLen:4] [cleartext:N]
         guard fullData.count >= 53,
               fullData[0] == BLEConstants.MessageType.attestRequest.rawValue else {
-            NSLog("[BLE] Invalid attest request (len=%d)", fullData.count)
+            NSLog("[BLE] Invalid attest request (len=%d, first=0x%02X)", fullData.count, fullData.first ?? 0)
             return
         }
 
         let cleartextHash = fullData[17..<49]
-        let cleartextLen = fullData[49..<53].withUnsafeBytes { $0.load(as: UInt32.self).littleEndian }
+        let cleartextLen = readUInt32LE(fullData, offset: 49)
         let cleartext: String
         if cleartextLen > 0 && fullData.count >= 53 + Int(cleartextLen) {
             cleartext = String(data: fullData[53..<(53 + Int(cleartextLen))], encoding: .utf8) ?? ""
@@ -261,6 +327,20 @@ final class BLEPeripheralManager: NSObject {
         NSLog("[BLE] Attest request: %d keystrokes, %d chars", session.keystrokeEvents.count, cleartext.count)
         delegate?.bleAttestationRequested(session, cleartext: cleartext, cleartextHash: Data(cleartextHash))
     }
+
+    // MARK: - Safe byte reading (avoids alignment crashes)
+
+    private func readUInt16LE(_ data: Data, offset: Int) -> UInt16 {
+        return UInt16(data[data.startIndex + offset]) |
+               UInt16(data[data.startIndex + offset + 1]) << 8
+    }
+
+    private func readUInt32LE(_ data: Data, offset: Int) -> UInt32 {
+        return UInt32(data[data.startIndex + offset]) |
+               UInt32(data[data.startIndex + offset + 1]) << 8 |
+               UInt32(data[data.startIndex + offset + 2]) << 16 |
+               UInt32(data[data.startIndex + offset + 3]) << 24
+    }
 }
 
 // MARK: - CBPeripheralManagerDelegate
@@ -268,8 +348,8 @@ final class BLEPeripheralManager: NSObject {
 extension BLEPeripheralManager: CBPeripheralManagerDelegate {
 
     func peripheralManagerDidUpdateState(_ peripheral: CBPeripheralManager) {
-        NSLog("[BLE] State: %d", peripheral.state.rawValue)
-        if peripheral.state == .poweredOn && isAdvertising {
+        NSLog("[BLE] State changed: %d", peripheral.state.rawValue)
+        if peripheral.state == .poweredOn && wantsToAdvertise {
             startAdvertising()
         }
     }
@@ -277,8 +357,16 @@ extension BLEPeripheralManager: CBPeripheralManagerDelegate {
     func peripheralManager(_ peripheral: CBPeripheralManager, didAdd service: CBService, error: Error?) {
         if let error = error {
             NSLog("[BLE] Failed to add service: %@", error.localizedDescription)
-        } else {
-            NSLog("[BLE] Service added successfully")
+            delegate?.bleAdvertisingStateChanged(advertising: false, error: "Service failed: \(error.localizedDescription)")
+            return
+        }
+
+        NSLog("[BLE] Service added successfully — now starting advertising")
+        serviceRegistered = true
+
+        // Now that the service is registered, start advertising if the user wants it
+        if wantsToAdvertise {
+            beginAdvertising()
         }
     }
 
@@ -286,8 +374,11 @@ extension BLEPeripheralManager: CBPeripheralManagerDelegate {
         if let error = error {
             NSLog("[BLE] Advertising failed: %@", error.localizedDescription)
             isAdvertising = false
+            delegate?.bleAdvertisingStateChanged(advertising: false, error: error.localizedDescription)
         } else {
-            NSLog("[BLE] Advertising started")
+            NSLog("[BLE] Advertising started successfully")
+            isAdvertising = true
+            delegate?.bleAdvertisingStateChanged(advertising: true, error: nil)
         }
     }
 
@@ -306,29 +397,47 @@ extension BLEPeripheralManager: CBPeripheralManagerDelegate {
         }
     }
 
+    func peripheralManagerIsReady(toUpdateSubscribers peripheral: CBPeripheralManager) {
+        NSLog("[BLE] Ready to send more data")
+        drainPendingChunks()
+    }
+
     func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveWrite requests: [CBATTRequest]) {
+        NSLog("[BLE] didReceiveWrite: %d request(s)", requests.count)
+
+        // Must respond to the FIRST request (Apple docs: respond to the first, it covers all)
+        var firstRequest: CBATTRequest?
+
         for request in requests {
+            if firstRequest == nil && request.characteristic.properties.contains(.write) {
+                firstRequest = request
+            }
+
             guard let data = request.value else {
-                peripheral.respond(to: request, withResult: .invalidAttributeValueLength)
+                NSLog("[BLE] Write request with no data for %@", request.characteristic.uuid.uuidString)
                 continue
             }
+
+            NSLog("[BLE] Write to %@: %d bytes, first byte=0x%02X", request.characteristic.uuid.uuidString, data.count, data.first ?? 0)
 
             switch request.characteristic.uuid {
             case BLEConstants.sessionUUID:
                 handleSessionInit(data, from: request.central)
-                peripheral.respond(to: request, withResult: .success)
 
             case BLEConstants.keystrokeUUID:
                 handleKeystrokeEvent(data)
-                // writeWithoutResponse — no respond needed
 
             case BLEConstants.attestRequestUUID:
                 handleAttestRequest(data)
-                peripheral.respond(to: request, withResult: .success)
 
             default:
-                peripheral.respond(to: request, withResult: .attributeNotFound)
+                NSLog("[BLE] Unknown characteristic: %@", request.characteristic.uuid.uuidString)
             }
+        }
+
+        // Respond to the first write request (covers all requests in the batch)
+        if let first = firstRequest {
+            peripheral.respond(to: first, withResult: .success)
         }
     }
 }

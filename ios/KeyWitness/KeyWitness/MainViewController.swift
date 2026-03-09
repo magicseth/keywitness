@@ -888,9 +888,9 @@ class MainViewController: UIViewController {
                 bleManager?.delegate = self
                 bleAttestationFlow = BLEAttestationFlow(viewController: self, bleManager: bleManager!)
             }
-            bleManager?.startAdvertising()
-            bleStatusLabel.text = "Advertising — waiting for connection…"
+            bleStatusLabel.text = "Starting BLE…"
             bleStatusLabel.textColor = .systemYellow
+            bleManager?.startAdvertising()
         } else {
             bleManager?.stopAdvertising()
             bleStatusLabel.text = "Off"
@@ -948,6 +948,17 @@ extension MainViewController: BLEPeripheralDelegate {
         bleStatusLabel.text = "Disconnected — waiting for connection…"
         bleStatusLabel.textColor = .systemYellow
         bleKeystrokeCount.isHidden = true
+    }
+
+    func bleAdvertisingStateChanged(advertising: Bool, error: String?) {
+        if advertising {
+            bleStatusLabel.text = "Advertising — waiting for connection…"
+            bleStatusLabel.textColor = .systemYellow
+        } else if let error = error {
+            bleStatusLabel.text = "BLE error: \(error)"
+            bleStatusLabel.textColor = .systemRed
+            bleToggle.isOn = false
+        }
     }
 }
 

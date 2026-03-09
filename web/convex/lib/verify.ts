@@ -126,7 +126,10 @@ function parseAttestationBlock(raw: string): Record<string, unknown> {
 async function verifyV3(vc: KeyWitnessVC): Promise<ServerVerificationResult> {
   const vcResult: VCVerificationResult = await verifyVC(vc);
   const fingerprint = vcResult.publicKey ? await computeFingerprint(base64urlDecode(vcResult.publicKey)) : undefined;
-  const hasDeviceProof = vcResult.proofs.some((p) => p.proofType === "deviceAttestation");
+  // SECURITY: Only mark device proof as present if it was actually validated.
+  // Mere existence of an AppAttestProof object is not sufficient — anyone can
+  // include one. Only server-verified proofs should count.
+  const hasDeviceProof = vcResult.proofs.some((p) => p.proofType === "deviceAttestation" && p.valid);
   const hasBiometricProof = vcResult.proofs.some((p) => p.proofType === "biometricVerification" && p.valid);
 
   return {

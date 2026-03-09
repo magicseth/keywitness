@@ -94,13 +94,17 @@ final class BLEAttestationFlow {
                     }
                 }
 
+                // Encode the session nonce as base64url to bind this VC to the BLE session
+                let challengeString = CryptoEngine.base64URLEncode(session.nonce)
+
                 let (block, encryptionKey) = try VCBuilder.createVC(
                     cleartext: cleartext,
                     keystrokeEvents: keystrokeEvents,
                     faceIdVerified: faceIdVerified,
                     appAttestKeyId: appAttestKeyId,
                     appAttestAssertion: appAttestAssertion,
-                    appAttestClientData: appAttestClientData
+                    appAttestClientData: appAttestClientData,
+                    challenge: challengeString
                 )
 
                 let result = BLEAttestationResult(

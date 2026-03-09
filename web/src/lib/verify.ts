@@ -294,8 +294,9 @@ async function verifyV3(
     }
   }
 
-  // Check for device attestation proof
-  const hasDeviceProof = vcResult.proofs.some((p) => p.proofType === "deviceAttestation");
+  // SECURITY: Only mark device proof as present if it was actually validated.
+  // Mere existence of an AppAttestProof object is not sufficient.
+  const hasDeviceProof = vcResult.proofs.some((p) => p.proofType === "deviceAttestation" && p.valid);
   const hasBiometricProof = vcResult.proofs.some((p) => p.proofType === "biometricVerification" && p.valid);
 
   return {
