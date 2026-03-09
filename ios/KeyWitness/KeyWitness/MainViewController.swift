@@ -401,6 +401,14 @@ class MainViewController: UIViewController {
         present(voiceVC, animated: true)
     }
 
+    // MARK: - Photo Attestation
+
+    @objc private func photoButtonTapped() {
+        let photoVC = PhotoCaptureViewController()
+        photoVC.modalPresentationStyle = .fullScreen
+        present(photoVC, animated: true)
+    }
+
     // MARK: - Keyboard Handling
 
     @objc private func keyboardWillShow(_ notification: Notification) {
@@ -613,7 +621,23 @@ class MainViewController: UIViewController {
         voiceButton.contentEdgeInsets = UIEdgeInsets(top: 12, left: 16, bottom: 12, right: 16)
         voiceButton.addTarget(self, action: #selector(voiceButtonTapped), for: .touchUpInside)
 
-        let stack = UIStackView(arrangedSubviews: [testHeader, testTextView, voiceButton])
+        // Photo attestation button
+        let photoButton = UIButton(type: .system)
+        photoButton.setTitle("  Snap Instead", for: .normal)
+        photoButton.setImage(UIImage(systemName: "camera.circle.fill"), for: .normal)
+        photoButton.tintColor = accentColor
+        photoButton.titleLabel?.font = .systemFont(ofSize: 15, weight: .semibold)
+        photoButton.backgroundColor = accentColor.withAlphaComponent(0.15)
+        photoButton.layer.cornerRadius = 10
+        photoButton.contentEdgeInsets = UIEdgeInsets(top: 12, left: 16, bottom: 12, right: 16)
+        photoButton.addTarget(self, action: #selector(photoButtonTapped), for: .touchUpInside)
+
+        let attestButtons = UIStackView(arrangedSubviews: [voiceButton, photoButton])
+        attestButtons.axis = .horizontal
+        attestButtons.spacing = 10
+        attestButtons.distribution = .fillEqually
+
+        let stack = UIStackView(arrangedSubviews: [testHeader, testTextView, attestButtons])
         stack.axis = .vertical
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false

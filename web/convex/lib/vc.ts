@@ -17,7 +17,7 @@ export interface DataIntegrityProof {
   verificationMethod: string;
   proofPurpose: "assertionMethod";
   proofValue: string;
-  proofType?: "keystrokeAttestation" | "biometricVerification" | "voiceAttestation";
+  proofType?: "keystrokeAttestation" | "biometricVerification" | "voiceAttestation" | "photoAttestation";
 }
 
 export interface AppleAppAttestProof {
@@ -181,7 +181,7 @@ export async function verifyVC(credential: KeyWitnessVC): Promise<VCVerification
     }
   }
 
-  const primaryProof = results.find((r) => r.proofType === "keystrokeAttestation" || r.proofType === "voiceAttestation");
+  const primaryProof = results.find((r) => r.proofType === "keystrokeAttestation" || r.proofType === "voiceAttestation" || r.proofType === "photoAttestation");
   const overallValid = primaryProof?.valid ?? false;
 
   let publicKey: string | undefined;

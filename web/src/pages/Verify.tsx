@@ -186,6 +186,7 @@ function proofTypeLabel(proofType: string): string {
   switch (proofType) {
     case "keystrokeAttestation": return "Keystroke Attestation";
     case "voiceAttestation": return "Voice Attestation";
+    case "photoAttestation": return "Photo Attestation";
     case "biometricVerification": return "Face ID Verification";
     case "deviceAttestation": return "Device Attestation";
     case "fingerprintVerification": return "Fingerprint Verification";
@@ -310,6 +311,7 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
   const hasFaceId = !!attestationDoc?.biometricSignature;
   const hasKeystrokeData = !!(result?.keystrokeTimings && result.keystrokeTimings.length > 0);
   const isVoice = result?.attestationType === "spoken";
+  const isPhoto = result?.attestationType === "photo";
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-gray-100">
@@ -369,7 +371,38 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
 
                   {/* Message content */}
                   <div className="px-8 pt-8 pb-6 sm:px-10 sm:pt-10 sm:pb-8">
-                    {result.cleartext ? (
+                    {isPhoto ? (
+                      <div>
+                        {result.cleartext && result.encrypted ? (
+                          (() => {
+                            // Decrypt and display photo from encrypted payload
+                            try {
+                              const inner = JSON.parse(atob(result.cleartext.replace(/-/g, "+").replace(/_/g, "/")));
+                              if (inner.imageBase64) {
+                                const imgBytes = atob(inner.imageBase64.replace(/-/g, "+").replace(/_/g, "/"));
+                                const arr = new Uint8Array(imgBytes.length);
+                                for (let i = 0; i < imgBytes.length; i++) arr[i] = imgBytes.charCodeAt(i);
+                                const blob = new Blob([arr], { type: "image/jpeg" });
+                                const url = URL.createObjectURL(blob);
+                                return <img src={url} alt="Attested photo" className="w-full rounded-lg" />;
+                              }
+                            } catch { /* fall through */ }
+                            return null;
+                          })()
+                        ) : null}
+                        <div className="mt-4 text-center">
+                          <div className="text-green-400 text-sm font-medium mb-1">Unfiltered Photograph</div>
+                          <div className="text-gray-500 text-xs">
+                            {result.imageWidth && result.imageHeight ? `${result.imageWidth}×${result.imageHeight}` : ""}
+                            {result.imageSizeBytes ? ` · ${(result.imageSizeBytes / 1024).toFixed(0)} KB` : ""}
+                            {result.imageFormat ? ` · ${result.imageFormat.toUpperCase()}` : ""}
+                          </div>
+                          {!result.cleartext && result.encrypted && (
+                            <div className="text-gray-600 text-xs mt-2">Photo encrypted — add decryption key to URL fragment to view</div>
+                          )}
+                        </div>
+                      </div>
+                    ) : result.cleartext ? (
                       <div className="relative pl-6">
                         {/* Decorative quote accent — thin green bar */}
                         <div className="absolute left-0 top-1 bottom-1 w-[3px] rounded-full bg-green-500/25" />
@@ -452,8 +485,8 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
                       </svg>
                       Verified
                     </span>
-                    <span className={(hasKeystrokeData || isVoice) ? "text-green-500/50" : ""}>
-                      {(hasKeystrokeData || isVoice) ? "\u2713" : "\u2013"} {isVoice ? "Voice" : "Keystrokes"}
+                    <span className={(hasKeystrokeData || isVoice || isPhoto) ? "text-green-500/50" : ""}>
+                      {(hasKeystrokeData || isVoice || isPhoto) ? "\u2713" : "\u2013"} {isPhoto ? "Camera Capture" : isVoice ? "Voice" : "Keystrokes"}
                     </span>
                     <span className={hasDeviceVerification ? "text-green-500/50" : ""}>
                       {hasDeviceVerification ? "\u2713" : "\u2013"} Device
@@ -470,6 +503,15 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
                 {/* What this means — plain English */}
                 <div className="rounded-xl bg-[#111111] border border-gray-800/60 p-6 space-y-3 text-sm text-gray-400">
                   <div className="text-white font-semibold text-base mb-2">What this means</div>
+                  {isPhoto && (
+                    <p>
+                      <span className="text-green-400 font-medium">Photo verified</span> — this photo was taken directly by the phone's camera and has not been edited, filtered, or modified.
+                      {result.imageWidth && result.imageHeight && (
+                        <> Original resolution: {result.imageWidth}×{result.imageHeight}.</>
+                      )}
+                      {" "}The image was hashed at capture time before any processing could occur.
+                    </p>
+                  )}
                   {isVoice && (
                     <p>
                       <span className="text-green-400 font-medium">Voice verified</span> — this text was spoken aloud into the phone's microphone.
@@ -478,7 +520,7 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
                       )}
                     </p>
                   )}
-                  {hasKeystrokeData && !isVoice && (
+                  {hasKeystrokeData && !isVoice && !isPhoto && (
                     <p>
                       <span className="text-green-400 font-medium">Keystrokes verified</span> — this text was typed by hand on a keyboard, not pasted or generated. The typing rhythm and finger positions are recorded in the seal.
                     </p>
@@ -494,7 +536,7 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
                       {attestationDoc?.biometricTimestamp ? ` ${Math.round((attestationDoc.biometricTimestamp - attestationDoc.createdAt) / 1000)} seconds after typing` : ""}.
                     </p>
                   )}
-                  {!hasKeystrokeData && !isVoice && !hasDeviceVerification && !hasFaceId && (
+                  {!hasKeystrokeData && !isVoice && !isPhoto && !hasDeviceVerification && !hasFaceId && (
                     <p>The cryptographic signature is valid — the text hasn't been modified since it was signed.</p>
                   )}
                 </div>

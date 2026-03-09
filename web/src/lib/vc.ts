@@ -29,7 +29,7 @@ export interface DataIntegrityProof {
   proofPurpose: "assertionMethod";
   proofValue: string; // multibase z + base58btc
   /** KeyWitness-specific: what kind of proof this is */
-  proofType?: "keystrokeAttestation" | "biometricVerification" | "voiceAttestation";
+  proofType?: "keystrokeAttestation" | "biometricVerification" | "voiceAttestation" | "photoAttestation";
 }
 
 export interface AppleAppAttestProof {
@@ -46,7 +46,7 @@ export interface AppleAppAttestProof {
 export type VCProof = DataIntegrityProof | AppleAppAttestProof;
 
 export interface KeyWitnessCredentialSubject {
-  type: "HumanTypedContent" | "HumanSpokenContent";
+  type: "HumanTypedContent" | "HumanSpokenContent" | "UnfilteredPhotograph";
   cleartextHash: string;
   encryptedCleartext?: string;
   deviceId: string;
@@ -59,6 +59,13 @@ export interface KeyWitnessCredentialSubject {
   audioMeshCorrelationScore?: number;
   inputSource?: string;
   audioDurationMs?: number;
+  // Photo-specific
+  imageHash?: string;
+  exifHash?: string;
+  imageWidth?: number;
+  imageHeight?: number;
+  imageFormat?: string;
+  imageSizeBytes?: number;
   // Common
   faceIdVerified?: boolean;
   /** App version that created this attestation */
@@ -288,7 +295,7 @@ export async function verifyVC(credential: KeyWitnessVC): Promise<VCVerification
   }
 
   // The credential is valid if the primary keystroke attestation proof is valid
-  const primaryProof = results.find((r) => r.proofType === "keystrokeAttestation" || r.proofType === "voiceAttestation");
+  const primaryProof = results.find((r) => r.proofType === "keystrokeAttestation" || r.proofType === "voiceAttestation" || r.proofType === "photoAttestation");
   const overallValid = primaryProof?.valid ?? false;
 
   // Extract raw public key from did:key for backward compat

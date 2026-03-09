@@ -65,7 +65,13 @@ export interface VerificationResult {
   // Trust status (fetched separately after verification)
   trustStatus?: TrustStatus;
   // Voice attestation fields
-  attestationType?: "typed" | "spoken";
+  attestationType?: "typed" | "spoken" | "photo";
+  // Photo-specific
+  imageHash?: string;
+  imageWidth?: number;
+  imageHeight?: number;
+  imageFormat?: string;
+  imageSizeBytes?: number;
   audioHash?: string;
   audioMeshCorrelationScore?: number;
   inputSource?: string;
@@ -268,6 +274,7 @@ async function verifyV3(
   let decryptionFailed = false;
 
   const isVoice = vc.credentialSubject.type === "HumanSpokenContent";
+  const isPhoto = vc.credentialSubject.type === "UnfilteredPhotograph";
 
   // Decrypt cleartext if encryption key is available
   if (encryptionKey && vc.credentialSubject.encryptedCleartext) {
@@ -310,7 +317,12 @@ async function verifyV3(
     cleartextHash: vc.credentialSubject.cleartextHash,
     cleartextLength: vc.credentialSubject.cleartextLength,
     proofs: vcResult.proofs,
-    attestationType: isVoice ? "spoken" : "typed",
+    attestationType: isPhoto ? "photo" : isVoice ? "spoken" : "typed",
+    imageHash: vc.credentialSubject.imageHash,
+    imageWidth: vc.credentialSubject.imageWidth,
+    imageHeight: vc.credentialSubject.imageHeight,
+    imageFormat: vc.credentialSubject.imageFormat,
+    imageSizeBytes: vc.credentialSubject.imageSizeBytes,
     audioHash: vc.credentialSubject.audioHash,
     audioMeshCorrelationScore: vc.credentialSubject.audioMeshCorrelationScore,
     inputSource: vc.credentialSubject.inputSource,

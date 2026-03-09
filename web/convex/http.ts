@@ -1123,6 +1123,7 @@ function buildBadgeHTML(shortId: string, style: string, theme: string, origin: s
     switch(t) {
       case "keystrokeAttestation": return "Keystroke";
       case "voiceAttestation": return "Voice";
+      case "photoAttestation": return "Photo";
       case "biometricVerification": return "Face ID";
       case "deviceAttestation": return "Device";
       default: return t;

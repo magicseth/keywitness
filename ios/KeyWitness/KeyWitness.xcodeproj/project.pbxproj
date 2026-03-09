@@ -35,6 +35,10 @@
 		B1B2C3D4E5F60015000B0001 /* KeyWitnessWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B1B2C3D4E5F60005000B0001 /* KeyWitnessWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		C1B2C3D4E5F60003000C0001 /* KeyboardKit in Frameworks */ = {isa = PBXBuildFile; productRef = C1B2C3D4E5F60002000C0001 /* KeyboardKit */; };
 		D1B2C3D4E5F60001000D0001 /* EmojiKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1B2C3D4E5F60002000D0001 /* EmojiKey.swift */; };
+		F1B2C3D4E5F60001000F0001 /* PhotoTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1B2C3D4E5F60011000F0001 /* PhotoTypes.swift */; };
+		F1B2C3D4E5F60002000F0001 /* PhotoCaptureSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1B2C3D4E5F60012000F0001 /* PhotoCaptureSession.swift */; };
+		F1B2C3D4E5F60003000F0001 /* PhotoVCBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1B2C3D4E5F60013000F0001 /* PhotoVCBuilder.swift */; };
+		F1B2C3D4E5F60004000F0001 /* PhotoCaptureViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1B2C3D4E5F60014000F0001 /* PhotoCaptureViewController.swift */; };
 		E1B2C3D4E5F60011000E0001 /* VoiceTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1B2C3D4E5F60001000E0001 /* VoiceTypes.swift */; };
 		E1B2C3D4E5F60012000E0001 /* AudioMeshCorrelator.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1B2C3D4E5F60002000E0001 /* AudioMeshCorrelator.swift */; };
 		E1B2C3D4E5F60013000E0001 /* VoiceVCBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1B2C3D4E5F60003000E0001 /* VoiceVCBuilder.swift */; };
@@ -101,6 +105,10 @@
 		B1B2C3D4E5F60003000B0001 /* KeyWitnessWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyWitnessWidgetBundle.swift; sourceTree = "<group>"; };
 		B1B2C3D4E5F60004000B0001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B1B2C3D4E5F60005000B0001 /* KeyWitnessWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = KeyWitnessWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		F1B2C3D4E5F60011000F0001 /* PhotoTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoTypes.swift; sourceTree = "<group>"; };
+		F1B2C3D4E5F60012000F0001 /* PhotoCaptureSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoCaptureSession.swift; sourceTree = "<group>"; };
+		F1B2C3D4E5F60013000F0001 /* PhotoVCBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoVCBuilder.swift; sourceTree = "<group>"; };
+		F1B2C3D4E5F60014000F0001 /* PhotoCaptureViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoCaptureViewController.swift; sourceTree = "<group>"; };
 		E1B2C3D4E5F60001000E0001 /* VoiceTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTypes.swift; sourceTree = "<group>"; };
 		E1B2C3D4E5F60002000E0001 /* AudioMeshCorrelator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioMeshCorrelator.swift; sourceTree = "<group>"; };
 		E1B2C3D4E5F60003000E0001 /* VoiceVCBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceVCBuilder.swift; sourceTree = "<group>"; };
@@ -155,6 +163,7 @@
 				A1B2C3D4E5F60004000A0001 /* MainViewController.swift */,
 				A1B2C3D4E5F60093000A0001 /* AppAttestManager.swift */,
 				E1B2C3D4E5F60020000E0001 /* Voice */,
+				F1B2C3D4E5F60020000F0001 /* Photo */,
 				A1B2C3D4E5F60097000A0001 /* LaunchScreen.storyboard */,
 				A1B2C3D4E5F60091000A0001 /* Assets.xcassets */,
 				A1B2C3D4E5F60016000A0001 /* Info.plist */,
@@ -204,6 +213,17 @@
 				B1B2C3D4E5F60001000B0001 /* KeyWitnessActivity.swift */,
 			);
 			path = Shared;
+			sourceTree = "<group>";
+		};
+		F1B2C3D4E5F60020000F0001 /* Photo */ = {
+			isa = PBXGroup;
+			children = (
+				F1B2C3D4E5F60011000F0001 /* PhotoTypes.swift */,
+				F1B2C3D4E5F60012000F0001 /* PhotoCaptureSession.swift */,
+				F1B2C3D4E5F60013000F0001 /* PhotoVCBuilder.swift */,
+				F1B2C3D4E5F60014000F0001 /* PhotoCaptureViewController.swift */,
+			);
+			path = Photo;
 			sourceTree = "<group>";
 		};
 		E1B2C3D4E5F60020000E0001 /* Voice */ = {
@@ -378,6 +398,10 @@
 				E1B2C3D4E5F60014000E0001 /* VoiceRecordingSession.swift in Sources */,
 				E1B2C3D4E5F60015000E0001 /* VoiceRecordingViewController.swift in Sources */,
 				B1B2C3D4E5F60010000B0001 /* KeyWitnessActivity.swift in Sources */,
+				F1B2C3D4E5F60001000F0001 /* PhotoTypes.swift in Sources */,
+				F1B2C3D4E5F60002000F0001 /* PhotoCaptureSession.swift in Sources */,
+				F1B2C3D4E5F60003000F0001 /* PhotoVCBuilder.swift in Sources */,
+				F1B2C3D4E5F60004000F0001 /* PhotoCaptureViewController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
