@@ -141,8 +141,7 @@ class KeyWitnessKeyboard: KeyboardInputViewController {
                                 self.textDocumentProxy.insertText(" ")
                             }
                             let shortURL = url
-                                .replacingOccurrences(of: "https://www.", with: "")
-                                .replacingOccurrences(of: "https://", with: "")
+                                .replacingOccurrences(of: "https://www.", with: "https://")
                             self.textDocumentProxy.insertText(shortURL)
 
                             self.storePendingBiometric(shortId: shortId, cleartext: cleartext)

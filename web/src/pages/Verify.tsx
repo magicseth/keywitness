@@ -133,6 +133,53 @@ function removeKnownKey(publicKey: string): void {
   localStorage.setItem(KNOWN_KEYS_STORAGE_KEY, JSON.stringify(keys));
 }
 
+function formatTimestampShort(iso: string): string {
+  try {
+    const date = new Date(iso);
+    if (isNaN(date.getTime())) return iso;
+    return date.toLocaleString(undefined, {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function VerifiedCheck({ title }: { title: string }) {
+  return (
+    <span
+      className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-green-500/20 text-green-400 text-[10px] font-bold flex-shrink-0"
+      title={title}
+    >
+      {"\u2713"}
+    </span>
+  );
+}
+
+function VerificationBadge({ verified, label, title }: { verified: boolean; label: React.ReactNode; title: string }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full font-medium ${
+        verified
+          ? "bg-green-900/30 text-green-400 border border-green-900/50"
+          : "bg-gray-800/50 text-gray-500 border border-gray-700/50"
+      }`}
+      title={title}
+    >
+      <span className={`w-3 h-3 rounded-full flex items-center justify-center text-[8px] font-bold ${
+        verified ? "bg-green-500/30 text-green-400" : "bg-gray-700 text-gray-500"
+      }`}>
+        {verified ? "\u2713" : "\u2013"}
+      </span>
+      {label}
+    </span>
+  );
+}
+
 function formatTimestamp(iso: string): string {
   try {
     const date = new Date(iso);
@@ -284,105 +331,132 @@ export default function Verify({ shortId }: { shortId?: string }) {
         {/* ── Results ── */}
         {result && (
           <div className="mb-12">
-            {/* Hero: Who wrote what */}
-            <div className={`rounded-xl p-6 mb-6 ${
-              status === "verified"
-                ? "bg-green-950/30 border border-green-900/40"
-                : status === "invalid"
+
+            {/* ── Error / Invalid state ── */}
+            {(isError || status === "invalid") && (
+              <div className={`rounded-xl p-6 mb-6 ${
+                status === "invalid"
                   ? "bg-red-950/30 border border-red-900/40"
                   : "bg-yellow-950/30 border border-yellow-900/40"
-            }`}>
-              {/* Status */}
-              <div className="flex items-center gap-3 mb-4">
-                <span className={`inline-flex items-center justify-center w-10 h-10 rounded-full text-lg font-bold ${
-                  status === "verified"
-                    ? "bg-green-500/20 text-green-400"
-                    : status === "invalid"
+              }`}>
+                <div className="flex items-center gap-3">
+                  <span className={`inline-flex items-center justify-center w-10 h-10 rounded-full text-lg font-bold ${
+                    status === "invalid"
                       ? "bg-red-500/20 text-red-400"
                       : "bg-yellow-500/20 text-yellow-400"
-                }`}>
-                  {status === "verified" ? "\u2713" : status === "invalid" ? "!" : "?"}
-                </span>
-                <div>
-                  <div className={`text-xl font-bold ${
-                    status === "verified" ? "text-green-400"
-                      : status === "invalid" ? "text-red-400"
-                        : "text-yellow-400"
                   }`}>
-                    {status === "verified" ? "Typed by a human" : status === "invalid" ? "Suspicious" : "Error"}
-                  </div>
-                  <div className="text-gray-500 text-sm">
-                    {status === "verified"
-                      ? "This was typed on a real device and hasn't been changed."
-                      : status === "invalid"
+                    {status === "invalid" ? "!" : "?"}
+                  </span>
+                  <div>
+                    <div className={`text-xl font-bold ${status === "invalid" ? "text-red-400" : "text-yellow-400"}`}>
+                      {status === "invalid" ? "Suspicious" : "Error"}
+                    </div>
+                    <div className="text-gray-500 text-sm">
+                      {status === "invalid"
                         ? "Something doesn't add up. This may have been altered or faked."
                         : ""}
+                    </div>
                   </div>
                 </div>
-                {result.version && (
-                  <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-gray-800 text-gray-500 font-mono">
-                    {result.version}
-                  </span>
+                {result.error && (
+                  <p className="text-red-400 text-sm mt-3">{result.error}</p>
                 )}
               </div>
+            )}
 
-              {/* Writer + Message */}
-              {!isError && (
-                <div className="space-y-4">
-                  {/* Who */}
-                  {result.publicKey && (
-                    <div>
-                      <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">Who</div>
-                      <div className="text-white text-lg font-semibold">
-                        {writerName || (keyRecord === null ? "Unknown person" : "Looking up...")}
-                      </div>
-                      {result.timestamp && (
-                        <div className="text-gray-500 text-sm mt-0.5">
-                          {formatTimestamp(result.timestamp)}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* What they wrote */}
-                  {result.cleartext ? (
-                    <CleartextWithAttribution cleartext={result.cleartext} timings={result.keystrokeTimings} encrypted={result.encrypted} />
-                  ) : result.encrypted && !result.cleartext ? (
-                    <div>
-                      <div className="text-xs text-gray-500 uppercase tracking-wider mb-1 flex items-center gap-2">
-                        What they wrote
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/50 text-blue-400 font-medium uppercase">
-                          Locked
-                        </span>
-                      </div>
-                      <div className="text-gray-500 text-sm italic mb-3">
-                        {result.decryptionFailed
-                          ? "Couldn't unlock the message. The link may be incomplete."
-                          : "This message is encrypted. Open the full link from the sender, or paste the text below."}
-                      </div>
-                      <textarea
-                        className="w-full h-24 bg-[#0a0a0a] border border-gray-700 rounded-lg p-3 font-mono text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-gray-600 focus:ring-1 focus:ring-gray-600 resize-y mb-2"
-                        placeholder="Paste the original text here to check if it matches..."
-                        value={manualCleartext}
-                        onChange={(e) => setManualCleartext(e.target.value)}
-                      />
-                      <button
-                        onClick={() => handleVerify(input, manualCleartext)}
-                        disabled={verifying || !manualCleartext.trim()}
-                        className="px-4 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                      >
-                        Check match
-                      </button>
-                    </div>
-                  ) : null}
+            {/* ── Verified: natural sentence layout ── */}
+            {!isError && status === "verified" && (
+              <div className="rounded-xl p-6 mb-6 bg-[#111111] border border-gray-800">
+                {/* Sentence: Human [Name] wrote ... */}
+                <div className="mb-5">
+                  <div className="text-2xl font-bold text-white leading-snug">
+                    <span className="text-gray-400">Human </span>
+                    <span className="text-white inline-flex items-center gap-1.5">
+                      {writerName || (keyRecord === null ? "Someone" : "...")}
+                      {writerName && <VerifiedCheck title="Registered identity" />}
+                    </span>
+                    <span className="text-gray-400"> wrote</span>
+                  </div>
                 </div>
-              )}
 
-              {/* Error */}
-              {result.error && (
-                <p className="text-red-400 text-sm mt-3">{result.error}</p>
-              )}
-            </div>
+                {/* The message */}
+                {result.cleartext ? (
+                  <CleartextWithAttribution cleartext={result.cleartext} timings={result.keystrokeTimings} encrypted={result.encrypted} />
+                ) : result.encrypted && !result.cleartext ? (
+                  <div>
+                    <div className="text-gray-500 text-sm italic mb-3">
+                      {result.decryptionFailed
+                        ? "Couldn't unlock the message. The link may be incomplete."
+                        : "This message is encrypted. Open the full link from the sender, or paste the text below."}
+                    </div>
+                    <textarea
+                      className="w-full h-24 bg-[#0a0a0a] border border-gray-700 rounded-lg p-3 font-mono text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-gray-600 focus:ring-1 focus:ring-gray-600 resize-y mb-2"
+                      placeholder="Paste the original text here to check if it matches..."
+                      value={manualCleartext}
+                      onChange={(e) => setManualCleartext(e.target.value)}
+                    />
+                    <button
+                      onClick={() => handleVerify(input, manualCleartext)}
+                      disabled={verifying || !manualCleartext.trim()}
+                      className="px-4 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    >
+                      Check match
+                    </button>
+                  </div>
+                ) : null}
+
+                {/* Context line: with an iPhone on Mon Mar 9 */}
+                <div className="mt-4 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-gray-500">
+                  <span>with</span>
+                  {hasDeviceVerification ? (
+                    <span className="inline-flex items-center gap-1 text-white font-medium">
+                      an iPhone <VerifiedCheck title="Real Apple device confirmed" />
+                    </span>
+                  ) : (
+                    <span className="text-gray-400">an unverified device</span>
+                  )}
+                  {result.timestamp && (
+                    <>
+                      <span>on</span>
+                      <span className="inline-flex items-center gap-1 text-white font-medium">
+                        {formatTimestampShort(result.timestamp)} <VerifiedCheck title="Cryptographically signed timestamp" />
+                      </span>
+                    </>
+                  )}
+                </div>
+
+                {/* Verification badges row */}
+                <div className="mt-4 pt-4 border-t border-gray-800 flex flex-wrap gap-3">
+                  <VerificationBadge
+                    verified={true}
+                    label="Signature valid"
+                    title="Message hasn't been tampered with"
+                  />
+                  <VerificationBadge
+                    verified={hasKeystrokeData}
+                    label="Keystroke data"
+                    title={hasKeystrokeData ? "Typed by a person (not copy-pasted)" : "No keystroke biometrics recorded"}
+                  />
+                  <VerificationBadge
+                    verified={hasDeviceVerification}
+                    label="Real device"
+                    title={hasDeviceVerification ? "Confirmed real Apple device via App Attest" : "Device not confirmed"}
+                  />
+                  <VerificationBadge
+                    verified={hasFaceId}
+                    label={hasFaceId ? (
+                      <>
+                        Face ID
+                        {attestationDoc?.biometricTimestamp && (
+                          <span className="text-gray-600 font-normal"> {Math.round((attestationDoc.biometricTimestamp - attestationDoc.createdAt) / 1000)}s</span>
+                        )}
+                      </>
+                    ) : "Face ID"}
+                    title={hasFaceId ? "Sender confirmed identity with Face ID" : "Face ID not confirmed"}
+                  />
+                </div>
+              </div>
+            )}
 
             {/* Trust warnings */}
             {trustStatus && (trustStatus.keyRevoked || trustStatus.credentialRevoked || trustStatus.appVersionTrusted === false) && (
@@ -401,88 +475,6 @@ export default function Verify({ shortId }: { shortId?: string }) {
                   {trustStatus.appVersionTrusted === false && (
                     <p>App version is no longer trusted{trustStatus.appVersionRevocationReason ? `: ${trustStatus.appVersionRevocationReason}` : "."}</p>
                   )}
-                </div>
-              </div>
-            )}
-
-            {/* ── Verified / Not Verified columns ── */}
-            {!isError && status === "verified" && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                {/* Verified */}
-                <div className="rounded-lg border border-green-900/40 bg-[#111111] p-4">
-                  <div className="flex items-center gap-2 mb-3">
-                    <span className="w-5 h-5 rounded-full bg-green-500/20 text-green-400 flex items-center justify-center text-xs font-bold">{"\u2713"}</span>
-                    <span className="text-green-400 text-sm font-semibold uppercase tracking-wide">Verified</span>
-                  </div>
-                  <ul className="space-y-2 text-sm">
-                    <li className="flex items-start gap-2">
-                      <span className="text-green-400 mt-0.5">{"\u2713"}</span>
-                      <span className="text-gray-300">Message hasn't been tampered with</span>
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <span className="text-green-400 mt-0.5">{"\u2713"}</span>
-                      <span className="text-gray-300">Typed by a person (not copy-pasted)</span>
-                    </li>
-                    {hasDeviceVerification && (
-                      <li className="flex items-start gap-2">
-                        <span className="text-green-400 mt-0.5">{"\u2713"}</span>
-                        <span className="text-gray-300">Real Apple device confirmed</span>
-                      </li>
-                    )}
-                    {hasFaceId && (
-                      <li className="flex items-start gap-2">
-                        <span className="text-green-400 mt-0.5">{"\u2713"}</span>
-                        <span className="text-gray-300">
-                          Face ID confirmed by sender
-                          {attestationDoc?.biometricTimestamp && (
-                            <span className="text-gray-600"> ({Math.round((attestationDoc.biometricTimestamp - attestationDoc.createdAt) / 1000)}s after typing)</span>
-                          )}
-                        </span>
-                      </li>
-                    )}
-                    {writerName && (
-                      <li className="flex items-start gap-2">
-                        <span className="text-green-400 mt-0.5">{"\u2713"}</span>
-                        <span className="text-gray-300">Registered as "{writerName}"</span>
-                      </li>
-                    )}
-                  </ul>
-                </div>
-
-                {/* Not Verified */}
-                <div className="rounded-lg border border-gray-800 bg-[#111111] p-4">
-                  <div className="flex items-center gap-2 mb-3">
-                    <span className="w-5 h-5 rounded-full bg-gray-700 text-gray-400 flex items-center justify-center text-xs font-bold">–</span>
-                    <span className="text-gray-400 text-sm font-semibold uppercase tracking-wide">Not verified</span>
-                  </div>
-                  <ul className="space-y-2 text-sm">
-                    {!hasDeviceVerification && (
-                      <li className="flex items-start gap-2">
-                        <span className="text-gray-600 mt-0.5">–</span>
-                        <span className="text-gray-500">Device not confirmed as a real iPhone</span>
-                      </li>
-                    )}
-                    {!hasFaceId && (
-                      <li className="flex items-start gap-2">
-                        <span className="text-gray-600 mt-0.5">–</span>
-                        <span className="text-gray-500">Face ID not confirmed</span>
-                      </li>
-                    )}
-                    {!writerName && (
-                      <li className="flex items-start gap-2">
-                        <span className="text-gray-600 mt-0.5">–</span>
-                        <span className="text-gray-500">Sender hasn't registered their name</span>
-                      </li>
-                    )}
-                    <li className="flex items-start gap-2">
-                      <span className="text-gray-600 mt-0.5">–</span>
-                      <span className="text-gray-500">Content originality — could be retyped from AI</span>
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <span className="text-gray-600 mt-0.5">–</span>
-                      <span className="text-gray-500">Whether the message was typed voluntarily</span>
-                    </li>
-                  </ul>
                 </div>
               </div>
             )}
