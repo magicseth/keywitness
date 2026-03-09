@@ -38,9 +38,9 @@ class MainViewController: UIViewController {
         loadPublicKey()
         requestNotificationPermission()
         setupAppAttest()
+        cleanupStaleActivities()
 
-        // Set ourselves as the notification delegate to handle taps
-        UNUserNotificationCenter.current().delegate = self
+        // Notification delegate is set in AppDelegate to ensure cold-launch taps are handled
 
         NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillShow(_:)), name: UIResponder.keyboardWillShowNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillHide(_:)), name: UIResponder.keyboardWillHideNotification, object: nil)
@@ -51,13 +51,17 @@ class MainViewController: UIViewController {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
-    override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
         checkPendingBiometric()
     }
 
     @objc private func appDidBecomeActive() {
-        checkPendingBiometric()
+        // Delay slightly so didReceive (notification tap) can run first and
+        // clean up the pending data, avoiding a double-trigger race.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.checkPendingBiometric()
+        }
     }
 
     override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
@@ -97,13 +101,16 @@ class MainViewController: UIViewController {
         let defaults = UserDefaults(suiteName: "group.io.keywitness")
         guard let shortId = defaults?.string(forKey: "pendingBiometricShortId"),
               let createdAt = defaults?.object(forKey: "pendingBiometricCreatedAt") as? Date else {
+            NSLog("[KeyWitness] checkPendingBiometric: no pending biometric found")
             return
         }
 
-        // Check 60-second window
+        // Check 5-minute window (Face ID is the real security gate, not the timer)
         let age = Date().timeIntervalSince(createdAt)
-        if age > 60 {
+        NSLog("[KeyWitness] checkPendingBiometric: shortId=%@, age=%.1fs", shortId, age)
+        if age > 300 {
             // Expired — clean up
+            NSLog("[KeyWitness] checkPendingBiometric: expired (%.1fs old)", age)
             defaults?.removeObject(forKey: "pendingBiometricShortId")
             defaults?.removeObject(forKey: "pendingBiometricCreatedAt")
             defaults?.removeObject(forKey: "pendingBiometricCleartext")
@@ -117,10 +124,7 @@ class MainViewController: UIViewController {
         defaults?.removeObject(forKey: "pendingBiometricCreatedAt")
         defaults?.removeObject(forKey: "pendingBiometricCleartext")
 
-        // Start Live Activity from the main app (extensions can't start them)
         startLiveActivity(shortId: shortId, cleartext: cleartext)
-
-        // Show confirmation before Face ID
         showBiometricConfirmation(shortId: shortId, cleartext: cleartext)
     }
 
@@ -128,31 +132,33 @@ class MainViewController: UIViewController {
     /// Uses the stored expiration time from the keyboard so the countdown is accurate.
     private func startLiveActivity(shortId: String, cleartext: String?) {
         guard #available(iOS 16.2, *) else {
-            print("[KeyWitness] Live Activities require iOS 16.2+")
+            NSLog("[KeyWitness] Live Activities require iOS 16.2+")
+            updateBiometricStatus("Live Activities require iOS 16.2+", color: .systemOrange)
             return
         }
 
         let authInfo = ActivityAuthorizationInfo()
-        print("[KeyWitness] Live Activities enabled: \(authInfo.areActivitiesEnabled), frequentPushesEnabled: \(authInfo.frequentPushesEnabled)")
+        NSLog("[KeyWitness] Live Activities enabled: %d, frequentPushes: %d", authInfo.areActivitiesEnabled ? 1 : 0, authInfo.frequentPushesEnabled ? 1 : 0)
         guard authInfo.areActivitiesEnabled else {
-            print("[KeyWitness] Live Activities not enabled in Settings")
+            NSLog("[KeyWitness] Live Activities not enabled in Settings")
+            updateBiometricStatus("Enable Live Activities in Settings > KeyWitness", color: .systemOrange)
             return
         }
 
         // Skip if we already have one running for this shortId
         let existing = Activity<KeyWitnessVerificationAttributes>.activities
-        print("[KeyWitness] Current live activities: \(existing.count)")
+        NSLog("[KeyWitness] Current live activities: %d", existing.count)
         if existing.contains(where: { $0.attributes.shortId == shortId }) {
-            print("[KeyWitness] Live Activity already exists for \(shortId)")
+            NSLog("[KeyWitness] Live Activity already exists for %@", shortId)
             return
         }
 
-        // Use the stored expiration from the keyboard, or fall back to 30s from now
+        // Always use 30s from now — the stored expiry from the keyboard may already
+        // be stale by the time the user taps the notification and the app opens.
         let defaults = UserDefaults(suiteName: "group.io.keywitness")
-        let storedExpiry = defaults?.object(forKey: "pendingBiometricExpiresAt") as? Date
-        let expiresAt = storedExpiry ?? Date().addingTimeInterval(30)
         defaults?.removeObject(forKey: "pendingBiometricExpiresAt")
-        print("[KeyWitness] Stored expiry: \(String(describing: storedExpiry)), using: \(expiresAt), now: \(Date())")
+        let expiresAt = Date().addingTimeInterval(30)
+        NSLog("[KeyWitness] Live Activity expiresAt: %@, now: %@", "\(expiresAt)", "\(Date())")
 
         let messagePreview: String
         if let text = cleartext, !text.isEmpty {
@@ -177,9 +183,10 @@ class MainViewController: UIViewController {
                 content: .init(state: state, staleDate: expiresAt),
                 pushType: nil
             )
-            print("[KeyWitness] Live Activity started: id=\(activity.id), shortId=\(shortId), expires=\(expiresAt)")
+            NSLog("[KeyWitness] Live Activity started: id=%@, shortId=%@", activity.id, shortId)
         } catch {
-            print("[KeyWitness] Failed to start Live Activity: \(error)")
+            NSLog("[KeyWitness] Failed to start Live Activity: %@", error.localizedDescription)
+            updateBiometricStatus("Live Activity error: \(error.localizedDescription)", color: .systemRed)
         }
     }
 
@@ -348,11 +355,34 @@ class MainViewController: UIViewController {
             for activity in Activity<KeyWitnessVerificationAttributes>.activities {
                 if activity.attributes.shortId == shortId {
                     Task {
+                        // Keep the completed activity visible for 30 seconds so the user
+                        // can see the result in Dynamic Island / Lock Screen
                         await activity.end(
                             .init(state: finalState, staleDate: nil),
-                            dismissalPolicy: .after(.now + 2)
+                            dismissalPolicy: .after(.now + 30)
                         )
+                        NSLog("[KeyWitness] Live Activity ended: shortId=%@, status=%@", shortId, status)
                     }
+                }
+            }
+        }
+    }
+
+    // MARK: - Activity Cleanup
+
+    /// End all stale Live Activities from previous sessions on app launch.
+    private func cleanupStaleActivities() {
+        if #available(iOS 16.2, *) {
+            let activities = Activity<KeyWitnessVerificationAttributes>.activities
+            NSLog("[KeyWitness] Cleanup: found %d existing activities", activities.count)
+            for activity in activities {
+                NSLog("[KeyWitness] Cleanup: ending stale activity %@ (shortId=%@)", activity.id, activity.attributes.shortId)
+                let finalState = KeyWitnessVerificationAttributes.ContentState(status: "expired")
+                Task {
+                    await activity.end(
+                        .init(state: finalState, staleDate: nil),
+                        dismissalPolicy: .immediate
+                    )
                 }
             }
         }
@@ -695,6 +725,7 @@ extension MainViewController: UNUserNotificationCenterDelegate {
                                 didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
         let userInfo = response.notification.request.content.userInfo
+        NSLog("[KeyWitness] didReceive notification tap: userInfo=%@", "\(userInfo)")
         if let shortId = userInfo["shortId"] as? String {
             // Get cleartext from notification userInfo (preferred) or shared defaults (fallback)
             let cleartext = (userInfo["cleartext"] as? String)
@@ -706,7 +737,6 @@ extension MainViewController: UNUserNotificationCenterDelegate {
             defaults?.removeObject(forKey: "pendingBiometricCreatedAt")
             defaults?.removeObject(forKey: "pendingBiometricCleartext")
 
-            // Start Live Activity from the main app
             startLiveActivity(shortId: shortId, cleartext: cleartext)
             showBiometricConfirmation(shortId: shortId, cleartext: cleartext)
         }

@@ -2,6 +2,8 @@ import UIKit
 import UserNotifications
 import KeyboardKit
 import SwiftUI
+// Note: Keyboard extensions cannot start Live Activities (Apple restriction).
+// The main app starts them when the notification is tapped.
 
 /// KeyWitnessKeyboard uses KeyboardKit for full keyboard layout (letters, numbers,
 /// symbols, globe) and overlays a transparent touch tracker to capture biometric
@@ -15,17 +17,29 @@ class KeyWitnessKeyboard: KeyboardInputViewController {
 
     static var serverBaseURL = "https://www.keywitness.io"
 
+    // MARK: - Constants
+
+    /// Two-character invisible signal (LTR mark + RTL mark) inserted on first
+    /// keystroke to let web forms know a KeyWitness keyboard is active.
+    static let presenceSignal = "\u{200E}\u{200F}"
+
     // MARK: - State
 
     var keystrokeEvents: [KeystrokeEvent] = []
     var touchTracker: BiometricTouchTracker?
     var pendingTouchDown: (time: TimeInterval, x: CGFloat, y: CGFloat, force: CGFloat, radius: CGFloat)?
     var isAttesting = false
+    var hasInsertedSignal = false
 
     // MARK: - Lifecycle
 
     override func viewDidLoad() {
         super.viewDidLoad()
+
+        // Disable autocomplete — we don't use it and it causes keystroke lag.
+        // Each character triggers textDidChange → performAutocomplete → SwiftUI re-render,
+        // all on the main thread, blocking the next keystroke insertion.
+        state.autocompleteContext.settings.isAutocompleteEnabled = false
     }
 
     override func viewWillSetupKeyboardView() {
@@ -48,6 +62,7 @@ class KeyWitnessKeyboard: KeyboardInputViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         installTouchTracker()
+        hasInsertedSignal = false
     }
 
     // MARK: - Touch Tracking Overlay
@@ -72,6 +87,22 @@ class KeyWitnessKeyboard: KeyboardInputViewController {
         tracker.delegate = tracker
         inputView.addGestureRecognizer(tracker)
         self.touchTracker = tracker
+    }
+
+    /// Insert then immediately delete an invisible two-character signal so
+    /// web forms using the KeyWitness SDK can detect our keyboard is active.
+    /// The insert+delete is fast enough that the signal fires an input event
+    /// but leaves no visible trace in the text.
+    func emitPresenceSignal() {
+        guard !hasInsertedSignal else { return }
+        hasInsertedSignal = true
+        textDocumentProxy.insertText(Self.presenceSignal)
+        // Defer deletion to the next run loop iteration so the browser's
+        // input event fires with the signal still in the text.
+        DispatchQueue.main.async { [weak self] in
+            self?.textDocumentProxy.deleteBackward()
+            self?.textDocumentProxy.deleteBackward()
+        }
     }
 
     /// Called by the action handler when a character key is pressed.
@@ -296,8 +327,19 @@ class KeyWitnessActionHandler: KeyboardAction.StandardActionHandler {
             }
         }
 
-        // Let KeyboardKit handle the actual key action
+        // Let KeyboardKit handle the actual key action (inserts the character)
         super.handle(gesture, on: action)
+
+        // Emit presence signal after the character is inserted so the
+        // field is never empty during the insert+delete cycle.
+        if gesture == .release {
+            switch action {
+            case .character, .space:
+                keyboard?.emitPresenceSignal()
+            default:
+                break
+            }
+        }
     }
 }
 

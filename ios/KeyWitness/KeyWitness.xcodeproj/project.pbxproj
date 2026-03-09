@@ -267,6 +267,9 @@
 		A1B2C3D4E5F60011000A0001 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
+				B1B2C3D4E5F60040000B0001 = {
+					CreatedOnToolsVersion = 15.0;
+				};
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1500;
 				LastUpgradeCheck = 1500;
@@ -277,9 +280,6 @@
 					A1B2C3D4E5F60040000A0001 = {
 						CreatedOnToolsVersion = 15.0;
 					};
-				};
-				B1B2C3D4E5F60040000B0001 = {
-					CreatedOnToolsVersion = 15.0;
 				};
 			};
 			buildConfigurationList = A1B2C3D4E5F60052000A0001 /* Build configuration list for PBXProject "KeyWitness" */;
@@ -521,6 +521,10 @@
 				DEVELOPMENT_TEAM = TCU64E3XV4;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = KeyWitness/Info.plist;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "KeyWitness uses Face ID to verify your identity for cryptographic attestations.";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
+				INFOPLIST_KEY_NSSupportsLiveActivitiesFrequentUpdates = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -549,6 +553,10 @@
 				DEVELOPMENT_TEAM = TCU64E3XV4;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = KeyWitness/Info.plist;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "KeyWitness uses Face ID to verify your identity for cryptographic attestations.";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
+				INFOPLIST_KEY_NSSupportsLiveActivitiesFrequentUpdates = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -575,8 +583,12 @@
 				DEVELOPMENT_TEAM = TCU64E3XV4;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Keyboard/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = KeyWitnessKeyboard;
+				INFOPLIST_KEY_CFBundleDisplayName = KeyWitness;
+				INFOPLIST_KEY_LSApplicationCategoryType = "";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "KeyWitness uses Face ID to verify your identity when signing text attestations.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
+				INFOPLIST_KEY_NSSupportsLiveActivitiesFrequentUpdates = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -601,8 +613,12 @@
 				DEVELOPMENT_TEAM = TCU64E3XV4;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Keyboard/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = KeyWitnessKeyboard;
+				INFOPLIST_KEY_CFBundleDisplayName = KeyWitness;
+				INFOPLIST_KEY_LSApplicationCategoryType = "";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "KeyWitness uses Face ID to verify your identity when signing text attestations.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
+				INFOPLIST_KEY_NSSupportsLiveActivitiesFrequentUpdates = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -628,6 +644,8 @@
 				INFOPLIST_FILE = KeyWitnessWidgets/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = KeyWitnessWidgets;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
+				INFOPLIST_KEY_NSSupportsLiveActivitiesFrequentUpdates = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -654,6 +672,8 @@
 				INFOPLIST_FILE = KeyWitnessWidgets/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = KeyWitnessWidgets;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
+				INFOPLIST_KEY_NSSupportsLiveActivitiesFrequentUpdates = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
