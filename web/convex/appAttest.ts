@@ -380,6 +380,84 @@ export const verifyAssertion = internalMutation({
   },
 });
 
+// ── Session-based assertion verification (permanent device tokens) ────────────
+
+export const verifySessionAssertion = internalMutation({
+  args: {
+    keyId: v.string(),
+    assertion: v.string(),
+    expectedClientData: v.string(),
+  },
+  handler: async (ctx, args) => {
+    // Validate session token format:
+    //   keywitness:session:BASE64URL_PUBKEY (current)
+    //   keywitness:session:YYYY-MM-DD:BASE64URL_PUBKEY (legacy, still accepted)
+    //   keywitness:session:YYYY-MM-DD (legacy, still accepted)
+    const sessionMatch = args.expectedClientData.match(/^keywitness:session:(?:\d{4}-\d{2}-\d{2}:?)?([A-Za-z0-9_-]+)?$/);
+    if (!sessionMatch) throw new Error("Not a valid session token format");
+
+    // Look up credential
+    const credential = await ctx.db
+      .query("appAttestCredentials")
+      .withIndex("by_keyId", (q) => q.eq("keyId", args.keyId))
+      .first();
+    if (!credential) throw new Error("Unknown App Attest key ID: " + args.keyId);
+
+    // Decode assertion CBOR
+    const assertionBytes = base64urlDecode(args.assertion);
+    const assertionObj = cborg.decode(assertionBytes) as Record<string, unknown>;
+    const rawSignature = assertionObj.signature as Uint8Array;
+    const rawAuthData = assertionObj.authenticatorData as Uint8Array;
+    if (!rawSignature || !rawAuthData) throw new Error("Missing signature or authenticatorData");
+
+    const signature = new Uint8Array(rawSignature);
+    const authenticatorData = new Uint8Array(rawAuthData);
+    if (authenticatorData.length < 37) throw new Error("authenticatorData too short");
+
+    const parsed = parseAuthData(authenticatorData);
+
+    // Verify RP ID hash
+    const rpIdHex = toHex(parsed.rpIdHash);
+    let rpMatch = false;
+    for (const appId of APP_IDS) {
+      const expected = await sha256(new TextEncoder().encode(appId));
+      if (rpIdHex === toHex(expected)) { rpMatch = true; break; }
+    }
+    if (!rpMatch) throw new Error("RP ID hash mismatch in session assertion");
+
+    // Skip counter check — session tokens are reused within the day
+    // But verify the signature is valid
+
+    const clientDataHash = await sha256(new TextEncoder().encode(args.expectedClientData));
+    const composite = new Uint8Array(authenticatorData.length + clientDataHash.length);
+    composite.set(authenticatorData, 0);
+    composite.set(clientDataHash, authenticatorData.length);
+    const nonce = await sha256(composite);
+
+    const rawKeyBytes = base64urlDecode(credential.credentialPublicKey);
+    const publicKey = await crypto.subtle.importKey(
+      "raw",
+      new Uint8Array(rawKeyBytes).buffer as ArrayBuffer,
+      { name: "ECDSA", namedCurve: "P-256" },
+      false,
+      ["verify"],
+    );
+
+    // Try all verification strategies
+    const rawSig = derToRawEcdsa(signature);
+    const valid =
+      await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, publicKey, new Uint8Array(rawSig).buffer as ArrayBuffer, new Uint8Array(composite).buffer as ArrayBuffer) ||
+      await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, publicKey, new Uint8Array(rawSig).buffer as ArrayBuffer, new Uint8Array(nonce).buffer as ArrayBuffer) ||
+      await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, publicKey, new Uint8Array(signature).buffer as ArrayBuffer, new Uint8Array(composite).buffer as ArrayBuffer) ||
+      await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, publicKey, new Uint8Array(signature).buffer as ArrayBuffer, new Uint8Array(nonce).buffer as ArrayBuffer);
+
+    if (!valid) throw new Error("Session assertion signature verification failed");
+
+    console.log("verifySessionAssertion: SUCCESS for keyId", args.keyId.slice(0, 8) + "...");
+    return { verified: true };
+  },
+});
+
 // ── DER ECDSA signature to raw (r||s) conversion ────────────────────────────
 
 function derToRawEcdsa(der: Uint8Array): Uint8Array {

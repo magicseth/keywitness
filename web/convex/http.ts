@@ -17,19 +17,28 @@ http.route({
 
     // If App Attest assertion is provided, verify it before storing
     let deviceVerified = false;
-    console.log("POST /api/attestations — appAttestKeyId:", body.appAttestKeyId ?? "MISSING", "hasAssertion:", !!body.appAttestAssertion, "hasClientData:", !!body.appAttestClientData, "debug:", body.appAttestDebug ?? "none");
     if (body.appAttestKeyId && body.appAttestAssertion && body.appAttestClientData) {
+      const isSession = (body.appAttestClientData as string).startsWith("keywitness:session:");
       try {
-        await ctx.runMutation(internal.appAttest.verifyAssertion, {
-          keyId: body.appAttestKeyId,
-          assertion: body.appAttestAssertion,
-          expectedClientData: body.appAttestClientData,
-        });
+        if (isSession) {
+          // Permanent session token from keyboard — reusable, skip counter check
+          await ctx.runMutation(internal.appAttest.verifySessionAssertion, {
+            keyId: body.appAttestKeyId,
+            assertion: body.appAttestAssertion,
+            expectedClientData: body.appAttestClientData,
+          });
+        } else {
+          // Direct assertion — one-time use with counter increment
+          await ctx.runMutation(internal.appAttest.verifyAssertion, {
+            keyId: body.appAttestKeyId,
+            assertion: body.appAttestAssertion,
+            expectedClientData: body.appAttestClientData,
+          });
+        }
         deviceVerified = true;
-        console.log("App Attest assertion verified successfully for keyId:", body.appAttestKeyId);
+        console.log("App Attest verified (session=" + isSession + ") for keyId:", body.appAttestKeyId);
       } catch (e) {
-        // Assertion failed — store attestation but mark as unverified
-        console.error("App Attest assertion verification failed:", e instanceof Error ? e.message : e);
+        console.error("App Attest verification failed:", e instanceof Error ? e.message : e);
       }
     }
 

@@ -4,6 +4,101 @@ import { api } from "../../convex/_generated/api";
 import { verifyAttestation, VerificationResult, KeystrokeTiming, ProofVerificationResult, TrustStatus } from "../lib/verify";
 import Nav from "../components/Nav";
 
+// ── Cleartext attribution helpers ───────────────────────────────────────────
+
+/**
+ * Given the cleartext and keystroke timings, determine which characters in the
+ * cleartext were actually typed on the KeyWitness keyboard. Returns an array of
+ * { char, attested } for each character in the cleartext.
+ *
+ * Comparison is alphanumeric-only and case-insensitive: non-alphanumeric chars
+ * (punctuation, emoji, etc.) are treated as "neutral" (attested by default since
+ * they aren't distinguishable). Alphanumeric chars are matched in order against
+ * the typed sequence from keystroke events.
+ */
+function attributeCleartext(
+  cleartext: string,
+  timings: KeystrokeTiming[] | undefined
+): { char: string; attested: boolean }[] {
+  if (!timings || timings.length === 0) {
+    // No keystroke data — can't attribute anything
+    return [...cleartext].map((char) => ({ char, attested: false }));
+  }
+
+  // Build the typed alphanumeric sequence from keystroke events
+  const typedAlpha: string[] = [];
+  for (const t of timings) {
+    const k = t.key === "space" ? " " : t.key;
+    // Only track alphanumeric chars for matching
+    if (/[a-zA-Z0-9]/.test(k)) {
+      typedAlpha.push(k.toLowerCase());
+    }
+  }
+
+  // Walk through cleartext and match alphanumeric chars against typed sequence
+  let typedIdx = 0;
+  return [...cleartext].map((char) => {
+    if (!/[a-zA-Z0-9]/.test(char)) {
+      // Non-alphanumeric: neutral (shown normally)
+      return { char, attested: true };
+    }
+    if (typedIdx < typedAlpha.length && char.toLowerCase() === typedAlpha[typedIdx]) {
+      typedIdx++;
+      return { char, attested: true };
+    }
+    // Alphanumeric but not in typed sequence — not attested
+    return { char, attested: false };
+  });
+}
+
+// ── Cleartext with attribution component ────────────────────────────────────
+
+function CleartextWithAttribution({ cleartext, timings, encrypted }: {
+  cleartext: string;
+  timings: KeystrokeTiming[] | undefined;
+  encrypted?: boolean;
+}) {
+  const attribution = attributeCleartext(cleartext, timings);
+  const hasUnattested = attribution.some((a) => !a.attested);
+  const attestedCount = attribution.filter((a) => a.attested && /[a-zA-Z0-9]/.test(a.char)).length;
+  const totalAlpha = attribution.filter((a) => /[a-zA-Z0-9]/.test(a.char)).length;
+
+  return (
+    <div>
+      <div className="text-xs text-gray-500 uppercase tracking-wider mb-1 flex items-center gap-2">
+        What they wrote
+        {encrypted && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/50 text-blue-400 font-medium uppercase">
+            Decrypted
+          </span>
+        )}
+        {hasUnattested && totalAlpha > 0 && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-900/50 text-yellow-400 font-medium">
+            {attestedCount}/{totalAlpha} characters verified
+          </span>
+        )}
+      </div>
+      <div className="text-base leading-relaxed bg-black/30 rounded-lg p-4 break-all">
+        {attribution.map((a, i) => (
+          <span
+            key={i}
+            className={a.attested ? "text-gray-200" : "text-red-400/70"}
+            title={a.attested ? undefined : "Not typed on KeyWitness keyboard"}
+          >
+            {a.char}
+          </span>
+        ))}
+      </div>
+      {hasUnattested && (
+        <div className="text-xs text-gray-600 mt-1.5 flex items-center gap-1.5">
+          <span className="inline-block w-2 h-2 rounded-full bg-red-400/70" />
+          Not typed on KeyWitness keyboard
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Known keys localStorage helpers ─────────────────────────────────────────
 
 interface KnownKeyEntry {
@@ -251,19 +346,7 @@ export default function Verify({ shortId }: { shortId?: string }) {
 
                   {/* What they wrote */}
                   {result.cleartext ? (
-                    <div>
-                      <div className="text-xs text-gray-500 uppercase tracking-wider mb-1 flex items-center gap-2">
-                        What they wrote
-                        {result.encrypted && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/50 text-blue-400 font-medium uppercase">
-                            Decrypted
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-gray-200 text-base leading-relaxed bg-black/30 rounded-lg p-4 break-all">
-                        {result.cleartext}
-                      </div>
-                    </div>
+                    <CleartextWithAttribution cleartext={result.cleartext} timings={result.keystrokeTimings} encrypted={result.encrypted} />
                   ) : result.encrypted && !result.cleartext ? (
                     <div>
                       <div className="text-xs text-gray-500 uppercase tracking-wider mb-1 flex items-center gap-2">

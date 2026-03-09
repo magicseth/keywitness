@@ -33,6 +33,7 @@
 		B1B2C3D4E5F60013000B0001 /* KeyWitnessLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1B2C3D4E5F60002000B0001 /* KeyWitnessLiveActivity.swift */; };
 		B1B2C3D4E5F60014000B0001 /* KeyWitnessWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1B2C3D4E5F60003000B0001 /* KeyWitnessWidgetBundle.swift */; };
 		B1B2C3D4E5F60015000B0001 /* KeyWitnessWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B1B2C3D4E5F60005000B0001 /* KeyWitnessWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		C1B2C3D4E5F60003000C0001 /* KeyboardKit in Frameworks */ = {isa = PBXBuildFile; productRef = C1B2C3D4E5F60002000C0001 /* KeyboardKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -108,6 +109,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A1B2C3D4E5F6000B000A0001 /* CryptoKit.framework in Frameworks */,
+				C1B2C3D4E5F60003000C0001 /* KeyboardKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -215,6 +217,9 @@
 			dependencies = (
 			);
 			name = KeyWitnessKeyboard;
+			packageProductDependencies = (
+				C1B2C3D4E5F60002000C0001 /* KeyboardKit */,
+			);
 			productName = KeyWitnessKeyboard;
 			productReference = A1B2C3D4E5F6000E000A0001 /* KeyWitnessKeyboard.appex */;
 			productType = "com.apple.product-type.app-extension";
@@ -286,6 +291,9 @@
 				Base,
 			);
 			mainGroup = A1B2C3D4E5F60030000A0001;
+			packageReferences = (
+				C1B2C3D4E5F60001000C0001 /* XCRemoteSwiftPackageReference "KeyboardKit" */,
+			);
 			productRefGroup = A1B2C3D4E5F60034000A0001 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -702,6 +710,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		C1B2C3D4E5F60001000C0001 /* XCRemoteSwiftPackageReference "KeyboardKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/KeyboardKit/KeyboardKit.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 9.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		C1B2C3D4E5F60002000C0001 /* KeyboardKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C1B2C3D4E5F60001000C0001 /* XCRemoteSwiftPackageReference "KeyboardKit" */;
+			productName = KeyboardKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A1B2C3D4E5F60011000A0001 /* Project object */;
 }

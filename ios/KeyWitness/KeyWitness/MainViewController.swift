@@ -74,8 +74,11 @@ class MainViewController: UIViewController {
         Task {
             do {
                 try await mgr.setupIfNeeded()
+                // Generate daily session token for the keyboard extension
+                await mgr.refreshSessionToken()
                 await MainActor.run {
-                    updateBiometricStatus("App Attest: OK (key: \(mgr.keyId?.prefix(8) ?? "?")…)", color: .systemGreen)
+                    let sessionStatus = mgr.hasValidSession ? "device token ✓" : "no device token"
+                    updateBiometricStatus("App Attest: OK (\(sessionStatus))", color: .systemGreen)
                     clearBiometricStatusAfterDelay()
                 }
             } catch {

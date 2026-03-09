@@ -206,12 +206,66 @@ final class AppAttestManager {
         }
     }
 
+    // MARK: - Session Token (shared with keyboard extension)
+
+    private static let sessionAssertionKey = "appAttestSessionAssertion"
+    private static let sessionKeyIdKey = "appAttestSessionKeyId"
+    private static let sessionClientDataKey = "appAttestSessionClientData"
+
+    /// The session challenge string, bound to this device's Ed25519 key.
+    /// Format: keywitness:session:{publicKey}
+    /// No expiry — the token proves "this Ed25519 key lives on a real Apple device"
+    /// and that fact doesn't change. Naturally invalidated by app reinstall (App Attest
+    /// key burned) or new Ed25519 key (embedded key won't match signatures).
+    private func sessionChallenge() throws -> String {
+        let pubKey = try CryptoEngine.publicKeyBase64URL()
+        return "keywitness:session:\(pubKey)"
+    }
+
+    /// Whether a valid session token exists.
+    var hasValidSession: Bool {
+        defaults?.string(forKey: Self.sessionAssertionKey) != nil
+    }
+
+    /// Generates a session assertion and stores it in shared UserDefaults
+    /// for the keyboard extension to read. Only needs to run once — the token
+    /// is permanent until the App Attest key is invalidated.
+    func refreshSessionToken() async {
+        guard isSupported else {
+            NSLog("[AppAttest] Session: not supported, skipping")
+            return
+        }
+
+        if hasValidSession {
+            NSLog("[AppAttest] Session: valid token already exists")
+            return
+        }
+
+        NSLog("[AppAttest] Session: generating token...")
+        do {
+            let clientDataString = try sessionChallenge()
+            let clientData = clientDataString.data(using: .utf8)!
+            let assertion = try await generateAssertion(for: clientData)
+
+            defaults?.set(CryptoEngine.base64URLEncode(assertion), forKey: Self.sessionAssertionKey)
+            defaults?.set(keyId, forKey: Self.sessionKeyIdKey)
+            defaults?.set(clientDataString, forKey: Self.sessionClientDataKey)
+
+            NSLog("[AppAttest] Session: token stored permanently")
+        } catch {
+            NSLog("[AppAttest] Session: failed to generate token: %@", error.localizedDescription)
+        }
+    }
+
     // MARK: - Reset (for key invalidation after reinstall)
 
     func resetIfNeeded() {
         log.warning("Resetting App Attest state")
         defaults?.removeObject(forKey: Self.keyIdKey)
         defaults?.removeObject(forKey: Self.attestedKey)
+        defaults?.removeObject(forKey: Self.sessionAssertionKey)
+        defaults?.removeObject(forKey: Self.sessionKeyIdKey)
+        defaults?.removeObject(forKey: Self.sessionClientDataKey)
     }
 }
 

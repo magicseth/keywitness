@@ -1,395 +1,138 @@
 import UIKit
 import UserNotifications
+import KeyboardKit
+import SwiftUI
 
-/// KeyWitnessKeyboard is the main UIInputViewController for the KeyWitness
-/// custom keyboard extension. It renders a QWERTY layout with touch biometric
-/// capture and an Attest button that signs the typed text.
+/// KeyWitnessKeyboard uses KeyboardKit for full keyboard layout (letters, numbers,
+/// symbols, globe) and overlays a transparent touch tracker to capture biometric
+/// keystroke data (coordinates, force, radius, timing) for cryptographic attestation.
 ///
 /// NOTE: Networking requires `RequestsOpenAccess = true` in Info.plist AND the
 /// user must grant "Allow Full Access" in Settings > General > Keyboard > KeyWitness.
-/// Without full access, URLSession requests from the keyboard extension will fail silently.
-class KeyWitnessKeyboard: UIInputViewController {
+class KeyWitnessKeyboard: KeyboardInputViewController {
 
     // MARK: - Configuration
 
-    /// Base URL for the KeyWitness API. Change this for development/staging environments.
     static var serverBaseURL = "https://www.keywitness.io"
 
     // MARK: - State
 
-    private var keystrokeEvents: [KeystrokeEvent] = []
-    private var pendingTouches: [UIButton: (key: String, downTime: TimeInterval, x: CGFloat, y: CGFloat, force: CGFloat, radius: CGFloat)] = [:]
-    private var isShifted = false
-    private weak var attestButton: UIButton?
-
-    // MARK: - Layout Constants
-
-    private let keyboardBackground  = UIColor(red: 0.11, green: 0.11, blue: 0.12, alpha: 1.0)
-    private let keyBackground       = UIColor(red: 0.25, green: 0.25, blue: 0.27, alpha: 1.0)
-    private let specialKeyBackground = UIColor(red: 0.18, green: 0.18, blue: 0.20, alpha: 1.0)
-    private let attestBackground    = UIColor(red: 0.20, green: 0.55, blue: 1.0, alpha: 1.0)
-    private let keyTextColor        = UIColor.white
-    private let keyCornerRadius: CGFloat = 5.0
-    private let rowSpacing: CGFloat = 8.0
-    private let keySpacing: CGFloat = 6.0
-    private let keyHeight: CGFloat  = 42.0
-
-    // MARK: - Row Definitions
-
-    private let letterRows: [[String]] = [
-        ["Q","W","E","R","T","Y","U","I","O","P"],
-        ["A","S","D","F","G","H","J","K","L"],
-        ["Z","X","C","V","B","N","M"]
-    ]
-
-    // MARK: - UI References
-
-    private var rowStackView: UIStackView!
-    private var debugLabel: UILabel!
+    var keystrokeEvents: [KeystrokeEvent] = []
+    var touchTracker: BiometricTouchTracker?
+    var pendingTouchDown: (time: TimeInterval, x: CGFloat, y: CGFloat, force: CGFloat, radius: CGFloat)?
+    var isAttesting = false
 
     // MARK: - Lifecycle
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        setupKeyboard()
     }
 
-    // MARK: - Keyboard Setup
-
-    private func setupKeyboard() {
-        guard let inputView = self.inputView else { return }
-        inputView.backgroundColor = keyboardBackground
-        inputView.allowsSelfSizing = true
-
-        let container = UIStackView()
-        container.axis = .vertical
-        container.spacing = rowSpacing
-        container.alignment = .fill
-        container.distribution = .fill
-        container.translatesAutoresizingMaskIntoConstraints = false
-
-        inputView.addSubview(container)
-        NSLayoutConstraint.activate([
-            container.topAnchor.constraint(equalTo: inputView.topAnchor, constant: 8),
-            container.leadingAnchor.constraint(equalTo: inputView.leadingAnchor, constant: 3),
-            container.trailingAnchor.constraint(equalTo: inputView.trailingAnchor, constant: -3),
-            container.bottomAnchor.constraint(equalTo: inputView.bottomAnchor, constant: -4)
-        ])
-
-        // Debug label — shows device verify status
-        let dbg = UILabel()
-        dbg.font = UIFont.systemFont(ofSize: 9, weight: .medium)
-        dbg.textColor = UIColor.systemCyan
-        dbg.textAlignment = .center
-        dbg.numberOfLines = 2
-        dbg.text = "Device verify: via main app (Face ID step)"
-        container.addArrangedSubview(dbg)
-        self.debugLabel = dbg
-
-        // Row 1: Q W E R T Y U I O P
-        container.addArrangedSubview(makeLetterRow(letterRows[0]))
-
-        // Row 2: A S D F G H J K L (inset slightly)
-        let row2 = makeLetterRow(letterRows[1])
-        let row2Wrapper = wrapWithInsets(row2, leading: 16, trailing: 16)
-        container.addArrangedSubview(row2Wrapper)
-
-        // Row 3: Shift + Z X C V B N M + Delete
-        container.addArrangedSubview(makeThirdRow())
-
-        // Row 4: Globe / Space / Attest / Return
-        container.addArrangedSubview(makeBottomRow())
-
-        rowStackView = container
-    }
-
-    // MARK: - Row Builders
-
-    private func makeLetterRow(_ letters: [String]) -> UIStackView {
-        let row = UIStackView()
-        row.axis = .horizontal
-        row.spacing = keySpacing
-        row.distribution = .fillEqually
-        row.alignment = .fill
-
-        for letter in letters {
-            let btn = makeKeyButton(title: letter)
-            btn.addTarget(self, action: #selector(keyTouchDown(_:event:)), for: .touchDown)
-            btn.addTarget(self, action: #selector(keyTouchUp(_:event:)), for: [.touchUpInside, .touchUpOutside])
-            btn.heightAnchor.constraint(equalToConstant: keyHeight).isActive = true
-            row.addArrangedSubview(btn)
-        }
-        return row
-    }
-
-    private func makeThirdRow() -> UIStackView {
-        let row = UIStackView()
-        row.axis = .horizontal
-        row.spacing = keySpacing
-        row.distribution = .fill
-        row.alignment = .fill
-
-        // Shift button
-        let shift = makeKeyButton(title: "\u{21E7}", background: specialKeyBackground)
-        shift.addTarget(self, action: #selector(shiftTapped), for: .touchUpInside)
-        shift.widthAnchor.constraint(equalToConstant: 42).isActive = true
-        shift.heightAnchor.constraint(equalToConstant: keyHeight).isActive = true
-        row.addArrangedSubview(shift)
-
-        // Letter keys
-        let lettersStack = UIStackView()
-        lettersStack.axis = .horizontal
-        lettersStack.spacing = keySpacing
-        lettersStack.distribution = .fillEqually
-
-        for letter in letterRows[2] {
-            let btn = makeKeyButton(title: letter)
-            btn.addTarget(self, action: #selector(keyTouchDown(_:event:)), for: .touchDown)
-            btn.addTarget(self, action: #selector(keyTouchUp(_:event:)), for: [.touchUpInside, .touchUpOutside])
-            btn.heightAnchor.constraint(equalToConstant: keyHeight).isActive = true
-            lettersStack.addArrangedSubview(btn)
-        }
-        row.addArrangedSubview(lettersStack)
-
-        // Delete button
-        let delete = makeKeyButton(title: "\u{232B}", background: specialKeyBackground)
-        delete.addTarget(self, action: #selector(deleteTapped), for: .touchUpInside)
-        delete.widthAnchor.constraint(equalToConstant: 42).isActive = true
-        delete.heightAnchor.constraint(equalToConstant: keyHeight).isActive = true
-        row.addArrangedSubview(delete)
-
-        return row
-    }
-
-    private func makeBottomRow() -> UIStackView {
-        let row = UIStackView()
-        row.axis = .horizontal
-        row.spacing = keySpacing
-        row.distribution = .fill
-        row.alignment = .fill
-
-        // Next keyboard button (globe)
-        let globe = makeKeyButton(title: "\u{1F310}", background: specialKeyBackground)
-        globe.addTarget(self, action: #selector(handleInputModeList(from:with:)), for: .allTouchEvents)
-        globe.widthAnchor.constraint(equalToConstant: 38).isActive = true
-        globe.heightAnchor.constraint(equalToConstant: keyHeight).isActive = true
-        row.addArrangedSubview(globe)
-
-        // Space bar
-        let space = makeKeyButton(title: "space", background: keyBackground)
-        space.addTarget(self, action: #selector(keyTouchDown(_:event:)), for: .touchDown)
-        space.addTarget(self, action: #selector(keyTouchUp(_:event:)), for: [.touchUpInside, .touchUpOutside])
-        space.accessibilityIdentifier = "space"
-        space.heightAnchor.constraint(equalToConstant: keyHeight).isActive = true
-        row.addArrangedSubview(space)
-
-        // Attest button
-        let attest = makeKeyButton(title: "Seal", background: attestBackground)
-        attest.titleLabel?.font = UIFont.systemFont(ofSize: 15, weight: .semibold)
-        attest.addTarget(self, action: #selector(attestTapped), for: .touchUpInside)
-        attest.widthAnchor.constraint(equalToConstant: 72).isActive = true
-        attest.heightAnchor.constraint(equalToConstant: keyHeight).isActive = true
-        self.attestButton = attest
-        row.addArrangedSubview(attest)
-
-        // Return
-        let returnBtn = makeKeyButton(title: "return", background: specialKeyBackground)
-        returnBtn.titleLabel?.font = UIFont.systemFont(ofSize: 15, weight: .regular)
-        returnBtn.addTarget(self, action: #selector(returnTapped), for: .touchUpInside)
-        returnBtn.widthAnchor.constraint(equalToConstant: 72).isActive = true
-        returnBtn.heightAnchor.constraint(equalToConstant: keyHeight).isActive = true
-        row.addArrangedSubview(returnBtn)
-
-        return row
-    }
-
-    // MARK: - Key Button Factory
-
-    private func makeKeyButton(title: String, background: UIColor? = nil) -> UIButton {
-        let btn = UIButton(type: .custom)
-        btn.setTitle(title, for: .normal)
-        btn.setTitleColor(keyTextColor, for: .normal)
-        btn.backgroundColor = background ?? keyBackground
-        btn.layer.cornerRadius = keyCornerRadius
-        btn.layer.shadowColor = UIColor.black.cgColor
-        btn.layer.shadowOffset = CGSize(width: 0, height: 1)
-        btn.layer.shadowOpacity = 0.35
-        btn.layer.shadowRadius = 0.5
-        btn.titleLabel?.font = UIFont.systemFont(ofSize: 22, weight: .light)
-        btn.translatesAutoresizingMaskIntoConstraints = false
-        return btn
-    }
-
-    private func wrapWithInsets(_ view: UIView, leading: CGFloat, trailing: CGFloat) -> UIView {
-        let wrapper = UIView()
-        wrapper.translatesAutoresizingMaskIntoConstraints = false
-        view.translatesAutoresizingMaskIntoConstraints = false
-        wrapper.addSubview(view)
-        NSLayoutConstraint.activate([
-            view.topAnchor.constraint(equalTo: wrapper.topAnchor),
-            view.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor),
-            view.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor, constant: leading),
-            view.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor, constant: -trailing)
-        ])
-        return wrapper
-    }
-
-    // MARK: - Touch Tracking
-
-    @objc private func keyTouchDown(_ sender: UIButton, event: UIEvent) {
-        let now = ProcessInfo.processInfo.systemUptime
-        var touchX: CGFloat = 0
-        var touchY: CGFloat = 0
-        var touchForce: CGFloat = 0
-        var touchRadius: CGFloat = 0
-
-        if let touch = event.allTouches?.first {
-            let loc = touch.location(in: sender)
-            touchX = loc.x
-            touchY = loc.y
-            touchForce = touch.force
-            touchRadius = touch.majorRadius
-        }
-
-        let key = resolveKeyLabel(sender)
-
-        pendingTouches[sender] = (
-            key: key,
-            downTime: now,
-            x: touchX,
-            y: touchY,
-            force: touchForce,
-            radius: touchRadius
+    override func viewWillSetupKeyboardView() {
+        // Set up action handler here — state/services are ready by viewWillAppear
+        services.actionHandler = KeyWitnessActionHandler(
+            controller: self,
+            keyboard: self
         )
 
-        // Visual feedback
-        UIView.animate(withDuration: 0.05) {
-            sender.alpha = 0.6
+        // Don't call super — we provide our own view
+        setupKeyboardView { [weak self] controller in
+            KeyWitnessKeyboardView(
+                state: controller.state,
+                services: controller.services,
+                onAttest: { self?.attestTapped() }
+            )
         }
     }
 
-    @objc private func keyTouchUp(_ sender: UIButton, event: UIEvent) {
-        let now = ProcessInfo.processInfo.systemUptime
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        installTouchTracker()
+    }
 
-        // Visual feedback restore
-        UIView.animate(withDuration: 0.1) {
-            sender.alpha = 1.0
+    // MARK: - Touch Tracking Overlay
+
+    private func installTouchTracker() {
+        guard touchTracker == nil, let inputView = self.inputView else { return }
+
+        let tracker = BiometricTouchTracker { [weak self] touchData in
+            if touchData.phase == .began {
+                self?.pendingTouchDown = (
+                    time: touchData.timestamp,
+                    x: touchData.x,
+                    y: touchData.y,
+                    force: touchData.force,
+                    radius: touchData.radius
+                )
+            }
         }
+        tracker.cancelsTouchesInView = false
+        tracker.delaysTouchesBegan = false
+        tracker.delaysTouchesEnded = false
+        tracker.delegate = tracker
+        inputView.addGestureRecognizer(tracker)
+        self.touchTracker = tracker
+    }
 
-        guard let pending = pendingTouches.removeValue(forKey: sender) else { return }
+    /// Called by the action handler when a character key is pressed.
+    func recordKeystroke(key: String) {
+        let now = ProcessInfo.processInfo.systemUptime
+        let down = pendingTouchDown
+        pendingTouchDown = nil
 
         let keystroke = KeystrokeEvent(
-            key: pending.key,
-            touchDownTime: pending.downTime,
+            key: key,
+            touchDownTime: down?.time ?? now,
             touchUpTime: now,
-            x: pending.x,
-            y: pending.y,
-            force: pending.force,
-            majorRadius: pending.radius
+            x: down?.x ?? 0,
+            y: down?.y ?? 0,
+            force: down?.force ?? 0,
+            majorRadius: down?.radius ?? 0
         )
         keystrokeEvents.append(keystroke)
-
-        // Insert the character
-        let charToInsert: String
-        if pending.key == "space" {
-            charToInsert = " "
-        } else {
-            charToInsert = isShifted ? pending.key.uppercased() : pending.key.lowercased()
-        }
-
-        textDocumentProxy.insertText(charToInsert)
-
-        // Auto-unshift after one letter
-        if isShifted && pending.key != "space" {
-            isShifted = false
-            updateShiftAppearance()
-        }
-    }
-
-    /// Determines the logical key label from the button.
-    private func resolveKeyLabel(_ button: UIButton) -> String {
-        if button.accessibilityIdentifier == "space" {
-            return "space"
-        }
-        return button.title(for: .normal) ?? ""
-    }
-
-    // MARK: - Special Key Actions
-
-    @objc private func shiftTapped() {
-        isShifted.toggle()
-        updateShiftAppearance()
-    }
-
-    @objc private func deleteTapped() {
-        textDocumentProxy.deleteBackward()
-    }
-
-    @objc private func returnTapped() {
-        textDocumentProxy.insertText("\n")
-    }
-
-    private func updateShiftAppearance() {
-        // Walk through all letter keys and update case
-        guard let container = rowStackView else { return }
-        for case let rowView in container.arrangedSubviews {
-            updateButtonCases(in: rowView)
-        }
-    }
-
-    private func updateButtonCases(in view: UIView) {
-        if let btn = view as? UIButton,
-           let title = btn.title(for: .normal),
-           title.count == 1, title.first?.isLetter == true {
-            let newTitle = isShifted ? title.uppercased() : title.lowercased()
-            btn.setTitle(newTitle, for: .normal)
-        }
-        for sub in view.subviews {
-            updateButtonCases(in: sub)
-        }
     }
 
     // MARK: - Attestation
 
-    @objc private func attestTapped() {
-        // Gather the full cleartext from the text document proxy
+    func attestTapped() {
+        guard !isAttesting else { return }
+
         let beforeCursor = textDocumentProxy.documentContextBeforeInput ?? ""
         let afterCursor = textDocumentProxy.documentContextAfterInput ?? ""
         let cleartext = beforeCursor + afterCursor
 
         guard !cleartext.isEmpty else { return }
 
-        setAttestButtonLoading(true)
+        isAttesting = true
 
-        // Build attestation in a Task to support async App Attest assertion
         let events = keystrokeEvents
         Task {
             do {
-                // App Attest is NOT available in keyboard extensions (Apple restriction).
-                // Device verification happens in the main app during biometric confirmation.
-                let appAttestKeyId: String? = nil
-                let appAttestAssertion: String? = nil
-                let appAttestClientData: String? = nil
-                await MainActor.run {
-                    self.debugLabel?.text = "Device verify: via main app (Face ID step)"
-                    self.debugLabel?.textColor = UIColor.systemCyan
-                }
+                let defaults = UserDefaults(suiteName: "group.io.keywitness")
+                let sessionAssertion = defaults?.string(forKey: "appAttestSessionAssertion")
+                let sessionKeyId = defaults?.string(forKey: "appAttestSessionKeyId")
+                let sessionClientData = defaults?.string(forKey: "appAttestSessionClientData")
 
-                NSLog("[KeyWitness] Building v3 attestation — appAttestKeyId: %@, hasAssertion: %d, hasClientData: %d", appAttestKeyId ?? "nil", appAttestAssertion != nil ? 1 : 0, appAttestClientData != nil ? 1 : 0)
+                let sessionValid = sessionAssertion != nil
+                NSLog("[KeyWitness] Session token valid: %d", sessionValid ? 1 : 0)
+
                 let (attestationBlock, encryptionKey) = try AttestationBuilder.createV3Attestation(
                     cleartext: cleartext,
                     keystrokeEvents: events,
                     faceIdVerified: false,
-                    appAttestKeyId: appAttestKeyId,
-                    appAttestAssertion: appAttestAssertion,
-                    appAttestClientData: appAttestClientData
+                    appAttestKeyId: sessionValid ? sessionKeyId : nil,
+                    appAttestAssertion: sessionValid ? sessionAssertion : nil,
+                    appAttestClientData: sessionValid ? sessionClientData : nil
                 )
                 NSLog("[KeyWitness] v3 attestation built successfully")
 
-                self.uploadAttestation(attestationBlock, encryptionKey: encryptionKey) { [weak self] result in
+                self.uploadAttestation(attestationBlock, encryptionKey: encryptionKey,
+                                       sessionKeyId: sessionValid ? sessionKeyId : nil,
+                                       sessionAssertion: sessionValid ? sessionAssertion : nil,
+                                       sessionClientData: sessionValid ? sessionClientData : nil) { [weak self] result in
                     DispatchQueue.main.async {
                         guard let self = self else { return }
-                        self.setAttestButtonLoading(false)
+                        self.isAttesting = false
 
                         switch result {
                         case .success(let (url, shortId)):
@@ -413,7 +156,7 @@ class KeyWitnessKeyboard: UIInputViewController {
                 }
             } catch {
                 await MainActor.run {
-                    self.setAttestButtonLoading(false)
+                    self.isAttesting = false
                     self.textDocumentProxy.insertText("\n[Attestation error: \(error.localizedDescription)]")
                 }
             }
@@ -422,7 +165,6 @@ class KeyWitnessKeyboard: UIInputViewController {
 
     // MARK: - Biometric Notification
 
-    /// Store the shortId in App Group so the container app can pick it up for Face ID verification.
     private func storePendingBiometric(shortId: String, cleartext: String) {
         let defaults = UserDefaults(suiteName: "group.io.keywitness")
         defaults?.set(shortId, forKey: "pendingBiometricShortId")
@@ -430,8 +172,6 @@ class KeyWitnessKeyboard: UIInputViewController {
         defaults?.set(cleartext, forKey: "pendingBiometricCleartext")
     }
 
-    /// Fire a notification for biometric confirmation.
-    /// Live Activity is started from the main app when it opens.
     private func fireBiometricNotification(shortId: String, cleartext: String) {
         let messagePreview: String
         if cleartext.count > 100 {
@@ -440,7 +180,6 @@ class KeyWitnessKeyboard: UIInputViewController {
             messagePreview = cleartext
         }
 
-        // Store expiration so the main app can show an accurate countdown
         let defaults = UserDefaults(suiteName: "group.io.keywitness")
         defaults?.set(Date().addingTimeInterval(30), forKey: "pendingBiometricExpiresAt")
 
@@ -463,14 +202,11 @@ class KeyWitnessKeyboard: UIInputViewController {
 
     // MARK: - Upload Helper
 
-    /// Uploads the attestation block to the KeyWitness server.
-    ///
-    /// - Parameters:
-    ///   - attestationBlock: The PEM-style attestation text block.
-    ///   - encryptionKey: The base64url-encoded AES key, appended as a URL fragment.
-    ///   - completion: Called with `.success((url, shortId))` or `.failure(error)`.
     private func uploadAttestation(_ attestationBlock: String,
                                    encryptionKey: String,
+                                   sessionKeyId: String? = nil,
+                                   sessionAssertion: String? = nil,
+                                   sessionClientData: String? = nil,
                                    completion: @escaping (Result<(String, String), Error>) -> Void) {
         let endpoint = Self.serverBaseURL + "/api/attestations"
 
@@ -483,7 +219,10 @@ class KeyWitnessKeyboard: UIInputViewController {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        let body: [String: String] = ["attestation": attestationBlock]
+        var body: [String: String] = ["attestation": attestationBlock]
+        if let keyId = sessionKeyId { body["appAttestKeyId"] = keyId }
+        if let assertion = sessionAssertion { body["appAttestAssertion"] = assertion }
+        if let clientData = sessionClientData { body["appAttestClientData"] = clientData }
         do {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         } catch {
@@ -508,7 +247,6 @@ class KeyWitnessKeyboard: UIInputViewController {
                 if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                    let attestationURL = json["url"] as? String,
                    let shortId = json["id"] as? String {
-                    // Append encryption key as URL fragment — the server never sees it
                     completion(.success((attestationURL + "#" + encryptionKey, shortId)))
                 } else {
                     completion(.failure(UploadError.unexpectedResponse))
@@ -518,13 +256,147 @@ class KeyWitnessKeyboard: UIInputViewController {
             }
         }.resume()
     }
+}
 
-    // MARK: - Attest Button Loading State
+// MARK: - KeyboardKit Action Handler
 
-    private func setAttestButtonLoading(_ loading: Bool) {
-        attestButton?.setTitle(loading ? "..." : "Seal", for: .normal)
-        attestButton?.isEnabled = !loading
-        attestButton?.alpha = loading ? 0.6 : 1.0
+/// Intercepts KeyboardKit key presses to record biometric keystroke data.
+class KeyWitnessActionHandler: KeyboardAction.StandardActionHandler {
+
+    private weak var keyboard: KeyWitnessKeyboard?
+
+    init(controller: KeyboardInputViewController, keyboard: KeyWitnessKeyboard) {
+        self.keyboard = keyboard
+        super.init(
+            controller: controller,
+            keyboardContext: controller.state.keyboardContext,
+            keyboardBehavior: controller.services.keyboardBehavior,
+            autocompleteContext: controller.state.autocompleteContext,
+            autocompleteService: controller.services.autocompleteService,
+            emojiContext: controller.state.emojiContext,
+            feedbackContext: controller.state.feedbackContext,
+            feedbackService: controller.services.feedbackService,
+            spaceDragGestureHandler: controller.services.spaceDragGestureHandler
+        )
+    }
+
+    override func handle(
+        _ gesture: Keyboard.Gesture,
+        on action: KeyboardAction
+    ) {
+        // Record character keystrokes for biometrics on release
+        if gesture == .release {
+            switch action {
+            case .character(let char):
+                keyboard?.recordKeystroke(key: char)
+            case .space:
+                keyboard?.recordKeystroke(key: "space")
+            default:
+                break
+            }
+        }
+
+        // Let KeyboardKit handle the actual key action
+        super.handle(gesture, on: action)
+    }
+}
+
+// MARK: - SwiftUI Keyboard View
+
+/// The keyboard view using KeyboardKit with a custom Seal toolbar.
+struct KeyWitnessKeyboardView: View {
+
+    let state: Keyboard.State
+    let services: Keyboard.Services
+    let onAttest: () -> Void
+
+    @EnvironmentObject var keyboardContext: KeyboardContext
+
+    var body: some View {
+        KeyboardView(
+            state: state,
+            services: services,
+            buttonContent: { $0.view },
+            buttonView: { $0.view },
+            collapsedView: { $0.view },
+            emojiKeyboard: { $0.view },
+            toolbar: { _ in
+                sealToolbar
+            }
+        )
+    }
+
+    private var sealToolbar: some View {
+        HStack(spacing: 8) {
+            Spacer()
+            Button(action: onAttest) {
+                HStack(spacing: 4) {
+                    Image(systemName: "checkmark.seal.fill")
+                        .font(.system(size: 13))
+                    Text("Seal")
+                        .font(.system(size: 14, weight: .semibold))
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 7)
+                .background(Color(red: 0.20, green: 0.55, blue: 1.0))
+                .cornerRadius(7)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Biometric Touch Tracker
+
+struct BiometricTouchData {
+    let timestamp: TimeInterval
+    let x: CGFloat
+    let y: CGFloat
+    let force: CGFloat
+    let radius: CGFloat
+    let phase: UITouch.Phase
+}
+
+/// Passively captures touch biometric data without interfering with KeyboardKit gestures.
+class BiometricTouchTracker: UIGestureRecognizer, UIGestureRecognizerDelegate {
+
+    private let onTouch: (BiometricTouchData) -> Void
+
+    init(onTouch: @escaping (BiometricTouchData) -> Void) {
+        self.onTouch = onTouch
+        super.init(target: nil, action: nil)
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesBegan(touches, with: event)
+        for touch in touches {
+            let loc = touch.location(in: self.view)
+            onTouch(BiometricTouchData(
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                x: loc.x, y: loc.y,
+                force: touch.force,
+                radius: touch.majorRadius,
+                phase: .began
+            ))
+        }
+        state = .possible
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesEnded(touches, with: event)
+        state = .possible
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesCancelled(touches, with: event)
+        state = .possible
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        return true
     }
 }
 
@@ -537,12 +409,9 @@ private enum UploadError: Error, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .invalidURL:
-            return "Invalid server URL"
-        case .serverError:
-            return "Server returned an error"
-        case .unexpectedResponse:
-            return "Unexpected server response"
+        case .invalidURL: return "Invalid server URL"
+        case .serverError: return "Server returned an error"
+        case .unexpectedResponse: return "Unexpected server response"
         }
     }
 }
