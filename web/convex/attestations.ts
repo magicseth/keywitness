@@ -35,6 +35,39 @@ export const getByShortId = query({
       .withIndex("by_shortId", (q) => q.eq("shortId", args.shortId))
       .first();
     if (!doc) return null;
-    return { attestation: doc.attestation, createdAt: doc.createdAt };
+    return {
+      attestation: doc.attestation,
+      createdAt: doc.createdAt,
+      biometricSignature: doc.biometricSignature,
+      biometricPublicKey: doc.biometricPublicKey,
+      biometricTimestamp: doc.biometricTimestamp,
+    };
+  },
+});
+
+export const addBiometricVerification = mutation({
+  args: {
+    shortId: v.string(),
+    signature: v.string(),   // base64url Ed25519 sig of "keywitness:biometric:<shortId>"
+    publicKey: v.string(),   // base64url Ed25519 public key
+  },
+  handler: async (ctx, args) => {
+    const doc = await ctx.db
+      .query("attestations")
+      .withIndex("by_shortId", (q) => q.eq("shortId", args.shortId))
+      .first();
+    if (!doc) throw new Error("Attestation not found");
+    if (doc.biometricSignature) throw new Error("Biometric already verified");
+
+    // Check that attestation is less than 60 seconds old
+    const age = Date.now() - doc.createdAt;
+    if (age > 60_000) throw new Error("Biometric verification window expired (60s)");
+
+    await ctx.db.patch(doc._id, {
+      biometricSignature: args.signature,
+      biometricPublicKey: args.publicKey,
+      biometricTimestamp: Date.now(),
+    });
+    return { success: true };
   },
 });

@@ -4,6 +4,7 @@ import UserNotifications
 
 /// Container app main screen. Shows setup instructions, the device public key,
 /// and a test text field to try the KeyWitness keyboard.
+/// Also handles biometric verification requests from the keyboard extension.
 class MainViewController: UIViewController {
 
     // MARK: - UI Elements
@@ -20,6 +21,7 @@ class MainViewController: UIViewController {
     private let registerKeyButton = UIButton(type: .system)
     private let testHeader = UILabel()
     private let testTextView = UITextView()
+    private let biometricStatusLabel = UILabel()
 
     // MARK: - Colors
 
@@ -29,17 +31,18 @@ class MainViewController: UIViewController {
 
     // MARK: - Lifecycle
 
-    private let faceIdStatusLabel = UILabel()
-
     override func viewDidLoad() {
         super.viewDidLoad()
         setupUI()
         loadPublicKey()
-        promptFaceId()
         requestNotificationPermission()
+
+        // Set ourselves as the notification delegate to handle taps
+        UNUserNotificationCenter.current().delegate = self
 
         NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillShow(_:)), name: UIResponder.keyboardWillShowNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillHide(_:)), name: UIResponder.keyboardWillHideNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(appDidBecomeActive), name: UIApplication.didBecomeActiveNotification, object: nil)
     }
 
     private func requestNotificationPermission() {
@@ -48,43 +51,127 @@ class MainViewController: UIViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        // Re-verify Face ID each time the app comes to foreground
-        promptFaceId()
+        checkPendingBiometric()
     }
 
-    private func promptFaceId() {
+    @objc private func appDidBecomeActive() {
+        checkPendingBiometric()
+    }
+
+    override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
+
+    // MARK: - Pending Biometric Check
+
+    /// Called when app becomes active — checks if a keyboard attestation needs Face ID.
+    private func checkPendingBiometric() {
+        let defaults = UserDefaults(suiteName: "group.io.keywitness")
+        guard let shortId = defaults?.string(forKey: "pendingBiometricShortId"),
+              let createdAt = defaults?.object(forKey: "pendingBiometricCreatedAt") as? Date else {
+            return
+        }
+
+        // Check 60-second window
+        let age = Date().timeIntervalSince(createdAt)
+        if age > 60 {
+            // Expired — clean up
+            defaults?.removeObject(forKey: "pendingBiometricShortId")
+            defaults?.removeObject(forKey: "pendingBiometricCreatedAt")
+            return
+        }
+
+        // Consume immediately so we don't re-trigger
+        defaults?.removeObject(forKey: "pendingBiometricShortId")
+        defaults?.removeObject(forKey: "pendingBiometricCreatedAt")
+
+        // Trigger Face ID
+        performBiometricVerification(shortId: shortId)
+    }
+
+    // MARK: - Biometric Verification Flow
+
+    private func performBiometricVerification(shortId: String) {
         let context = LAContext()
         context.localizedFallbackTitle = ""
         var error: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) else {
-            updateFaceIdStatus(verified: false)
+            updateBiometricStatus("Biometrics unavailable", color: .systemRed)
             return
         }
+
+        updateBiometricStatus("Verifying identity...", color: .systemYellow)
+
         context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics,
-                               localizedReason: "Verify your identity for KeyWitness attestations") { [weak self] success, _ in
+                               localizedReason: "Verify your identity for attestation \(shortId)") { [weak self] success, _ in
             DispatchQueue.main.async {
                 if success {
-                    let defaults = UserDefaults(suiteName: "group.io.keywitness")
-                    // Session timestamp for keyboard unlock (10 min)
-                    defaults?.set(Date(), forKey: "faceIdVerifiedAt")
-                    // Attest token with timestamp — keyboard enforces 2-min expiry
-                    defaults?.set(Date(), forKey: "attestTokenCreatedAt")
+                    self?.uploadBiometricSignature(shortId: shortId)
+                } else {
+                    self?.updateBiometricStatus("Verification cancelled", color: .systemRed)
+                    self?.clearBiometricStatusAfterDelay()
                 }
-                self?.updateFaceIdStatus(verified: success)
             }
         }
     }
 
-    private func updateFaceIdStatus(verified: Bool) {
-        let biometricType = LAContext().biometryType
-        let name = biometricType == .touchID ? "Touch ID" : "Face ID"
-        faceIdStatusLabel.text = verified
-            ? "\(name): Verified (keyboard unlock: 10 min, attest: 2 min)"
-            : "\(name): Not verified"
-        faceIdStatusLabel.textColor = verified ? .systemGreen : .systemRed
+    private func uploadBiometricSignature(shortId: String) {
+        updateBiometricStatus("Signing...", color: .systemYellow)
+
+        do {
+            let challenge = "keywitness:biometric:\(shortId)"
+            guard let data = challenge.data(using: .utf8) else {
+                throw CryptoEngineError.encryptionFailed
+            }
+            let signature = try CryptoEngine.signBase64URL(data)
+            let publicKey = try CryptoEngine.publicKeyBase64URL()
+
+            let url = URL(string: "https://www.keywitness.io/api/attestations/verify-biometric")!
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+            let payload: [String: String] = [
+                "shortId": shortId,
+                "signature": signature,
+                "publicKey": publicKey,
+            ]
+            request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+
+            URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+                DispatchQueue.main.async {
+                    if let httpResponse = response as? HTTPURLResponse,
+                       httpResponse.statusCode == 200, error == nil {
+                        self?.updateBiometricStatus("✓ Biometric verified for \(shortId)", color: .systemGreen)
+                    } else {
+                        var msg = "Upload failed"
+                        if let data = data,
+                           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                           let errorMsg = json["error"] as? String {
+                            msg = errorMsg
+                        }
+                        self?.updateBiometricStatus(msg, color: .systemRed)
+                    }
+                    self?.clearBiometricStatusAfterDelay()
+                }
+            }.resume()
+        } catch {
+            updateBiometricStatus("Signing error: \(error.localizedDescription)", color: .systemRed)
+            clearBiometricStatusAfterDelay()
+        }
     }
 
-    override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
+    private func updateBiometricStatus(_ text: String, color: UIColor) {
+        biometricStatusLabel.text = text
+        biometricStatusLabel.textColor = color
+        biometricStatusLabel.isHidden = false
+    }
+
+    private func clearBiometricStatusAfterDelay() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+            self?.biometricStatusLabel.isHidden = true
+        }
+    }
+
+    // MARK: - Keyboard Handling
 
     @objc private func keyboardWillShow(_ notification: Notification) {
         guard let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
@@ -94,7 +181,6 @@ class MainViewController: UIViewController {
             self.scrollView.contentInset.bottom = inset
             self.scrollView.verticalScrollIndicatorInsets.bottom = inset
         }
-        // Scroll to make the test field visible
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             let rect = self.testTextView.convert(self.testTextView.bounds, to: self.scrollView)
             self.scrollView.scrollRectToVisible(rect.insetBy(dx: 0, dy: -20), animated: true)
@@ -152,11 +238,15 @@ class MainViewController: UIViewController {
         subtitleLabel.textAlignment = .center
         contentStack.addArrangedSubview(subtitleLabel)
 
+        // Biometric status (hidden by default)
+        biometricStatusLabel.font = UIFont.systemFont(ofSize: 15, weight: .medium)
+        biometricStatusLabel.textAlignment = .center
+        biometricStatusLabel.numberOfLines = 0
+        biometricStatusLabel.isHidden = true
+        contentStack.addArrangedSubview(biometricStatusLabel)
+
         // Instructions card
         setupInstructionsCard()
-
-        // Face ID section
-        setupFaceIdSection()
 
         // Public key section
         setupPublicKeySection()
@@ -183,10 +273,11 @@ class MainViewController: UIViewController {
         1. Open Settings > General > Keyboard > Keyboards
         2. Tap "Add New Keyboard..."
         3. Select "KeyWitness" from the list
-        4. Switch to the KeyWitness keyboard in any app
-        5. Type your message, then tap "Attest" to sign it
+        4. Enable "Allow Full Access" for network features
+        5. Switch to the KeyWitness keyboard in any app
+        6. Type your message, then tap "Attest" to sign it
 
-        The keyboard captures keystroke biometrics (timing, position, pressure) and signs the text with a device-bound Ed25519 key. No network access is required.
+        After attesting, you'll get a notification to verify with Face ID. Tap the notification within 30 seconds to add biometric proof to your attestation.
         """
 
         let stack = UIStackView(arrangedSubviews: [header, instructionsLabel])
@@ -200,54 +291,6 @@ class MainViewController: UIViewController {
             stack.trailingAnchor.constraint(equalTo: instructionsCard.trailingAnchor, constant: -16),
             stack.bottomAnchor.constraint(equalTo: instructionsCard.bottomAnchor, constant: -16)
         ])
-    }
-
-    private func setupFaceIdSection() {
-        let card = UIView()
-        card.backgroundColor = cardColor
-        card.layer.cornerRadius = 12
-        card.translatesAutoresizingMaskIntoConstraints = false
-        contentStack.addArrangedSubview(card)
-
-        let biometricType = LAContext().biometryType
-        let biometricName = biometricType == .touchID ? "Touch ID" : "Face ID"
-
-        let header = UILabel()
-        header.text = biometricName
-        header.font = UIFont.systemFont(ofSize: 20, weight: .semibold)
-        header.textColor = .white
-
-        faceIdStatusLabel.font = UIFont.systemFont(ofSize: 15, weight: .medium)
-        faceIdStatusLabel.text = "Checking..."
-        faceIdStatusLabel.textColor = .lightGray
-
-        let reverifyButton = UIButton(type: .system)
-        reverifyButton.setTitle("Re-verify \(biometricName)", for: .normal)
-        reverifyButton.tintColor = accentColor
-        reverifyButton.addTarget(self, action: #selector(reverifyFaceId), for: .touchUpInside)
-
-        let desc = UILabel()
-        desc.text = "\(biometricName) unlocks the keyboard (10 min) and is required for attestation (2 min)."
-        desc.font = UIFont.systemFont(ofSize: 13)
-        desc.textColor = .lightGray
-        desc.numberOfLines = 0
-
-        let stack = UIStackView(arrangedSubviews: [header, faceIdStatusLabel, reverifyButton, desc])
-        stack.axis = .vertical
-        stack.spacing = 10
-        stack.alignment = .center
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        card.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 16),
-            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
-            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
-            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -16)
-        ])
-    }
-
-    @objc private func reverifyFaceId() {
-        promptFaceId()
     }
 
     private func setupPublicKeySection() {
@@ -369,7 +412,6 @@ class MainViewController: UIViewController {
             return
         }
 
-        // Show alert to let user set a display name
         let alert = UIAlertController(title: "Register Public Key", message: "Choose a display name that others will see when verifying your attestations.", preferredStyle: .alert)
         alert.addTextField { textField in
             textField.placeholder = "Display name"
@@ -386,7 +428,6 @@ class MainViewController: UIViewController {
     }
 
     private func doRegister(publicKey: String, name: String) {
-        // Sign a challenge to prove we own the private key
         let signature: String
         do {
             let result = try CryptoEngine.signRegistrationChallenge(name: name)
@@ -449,5 +490,28 @@ extension MainViewController: UITextViewDelegate {
             textView.text = "Tap here and switch to KeyWitness keyboard..."
             textView.textColor = .gray
         }
+    }
+}
+
+// MARK: - UNUserNotificationCenterDelegate
+
+extension MainViewController: UNUserNotificationCenterDelegate {
+    /// Handle notification tap when app is in foreground
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        // Show the notification even when app is in foreground
+        completionHandler([.banner, .sound])
+    }
+
+    /// Handle notification tap — triggers Face ID flow
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        let userInfo = response.notification.request.content.userInfo
+        if let shortId = userInfo["shortId"] as? String {
+            performBiometricVerification(shortId: shortId)
+        }
+        completionHandler()
     }
 }

@@ -6,6 +6,9 @@ export default defineSchema({
     shortId: v.string(),
     attestation: v.string(),
     createdAt: v.number(),
+    biometricSignature: v.optional(v.string()),   // Ed25519 sig of "keywitness:biometric:<shortId>"
+    biometricPublicKey: v.optional(v.string()),    // base64url public key that signed it
+    biometricTimestamp: v.optional(v.number()),     // Date.now() when biometric was verified
   }).index("by_shortId", ["shortId"]),
   keys: defineTable({
     publicKey: v.string(),      // base64url-encoded Ed25519 public key

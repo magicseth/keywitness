@@ -263,16 +263,29 @@ export default function Verify({ shortId }: { shortId?: string }) {
                   value={result.deviceId}
                   mono
                 />
-                <Field
-                  label="Face ID Verified"
-                  value={
-                    result.faceIdVerified === undefined
-                      ? "N/A (older attestation)"
-                      : result.faceIdVerified
-                        ? "Yes — device owner confirmed"
-                        : "No — not verified"
-                  }
-                />
+                <div className="px-5 py-3 bg-[#111111]">
+                  <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">
+                    Biometric Verification
+                  </div>
+                  {attestationDoc?.biometricSignature ? (
+                    <div>
+                      <span className="text-green-400 text-sm font-medium">
+                        Verified with Face ID / Touch ID
+                      </span>
+                      {attestationDoc.biometricTimestamp && (
+                        <span className="text-gray-500 text-xs ml-2">
+                          {Math.round((attestationDoc.biometricTimestamp - attestationDoc.createdAt) / 1000)}s after attestation
+                        </span>
+                      )}
+                    </div>
+                  ) : attestationDoc && !attestationDoc.biometricSignature ? (
+                    <span className="text-yellow-400 text-sm">
+                      Not verified — no biometric proof attached
+                    </span>
+                  ) : (
+                    <span className="text-gray-500 text-sm">Checking...</span>
+                  )}
+                </div>
                 <Field
                   label="Timestamp"
                   value={

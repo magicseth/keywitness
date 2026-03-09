@@ -65,6 +65,53 @@ http.route({
   }),
 });
 
+// POST /api/attestations/verify-biometric - add biometric verification to attestation
+http.route({
+  path: "/api/attestations/verify-biometric",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const body = await request.json();
+    try {
+      const result = await ctx.runMutation(api.attestations.addBiometricVerification, {
+        shortId: body.shortId,
+        signature: body.signature,
+        publicKey: body.publicKey,
+      });
+      return new Response(JSON.stringify(result), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
+      });
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Unknown error";
+      return new Response(JSON.stringify({ error: message }), {
+        status: 400,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
+      });
+    }
+  }),
+});
+
+// OPTIONS for CORS preflight on verify-biometric
+http.route({
+  path: "/api/attestations/verify-biometric",
+  method: "OPTIONS",
+  handler: httpAction(async () => {
+    return new Response(null, {
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+      },
+    });
+  }),
+});
+
 // OPTIONS for CORS preflight on keys/register
 http.route({
   path: "/api/keys/register",

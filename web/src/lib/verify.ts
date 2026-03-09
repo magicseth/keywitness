@@ -64,22 +64,26 @@ function base64urlEncode(bytes: Uint8Array): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
 async function decryptAESGCM(ciphertextB64: string, keyB64: string): Promise<string> {
   const ciphertextBytes = base64urlDecode(ciphertextB64);
   const keyBytes = base64urlDecode(keyB64);
   const nonce = ciphertextBytes.slice(0, 12);
   const rest = ciphertextBytes.slice(12);
-  const key = await crypto.subtle.importKey("raw", keyBytes, "AES-GCM", false, ["decrypt"]);
+  const key = await crypto.subtle.importKey("raw", toArrayBuffer(keyBytes), "AES-GCM", false, ["decrypt"]);
   const decrypted = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: nonce, tagLength: 128 },
+    { name: "AES-GCM", iv: toArrayBuffer(nonce), tagLength: 128 },
     key,
-    rest,
+    toArrayBuffer(rest),
   );
   return new TextDecoder().decode(decrypted);
 }
 
 async function sha256Base64url(data: Uint8Array): Promise<string> {
-  const hash = await crypto.subtle.digest("SHA-256", data);
+  const hash = await crypto.subtle.digest("SHA-256", toArrayBuffer(data));
   return base64urlEncode(new Uint8Array(hash));
 }
 
@@ -94,7 +98,7 @@ function bytesToHex(bytes: Uint8Array): string {
 async function computeFingerprint(publicKeyBytes: Uint8Array): Promise<string> {
   const hash = await crypto.subtle.digest(
     "SHA-256",
-    publicKeyBytes as unknown as ArrayBuffer,
+    toArrayBuffer(publicKeyBytes),
   );
   const hex = bytesToHex(new Uint8Array(hash));
   return hex

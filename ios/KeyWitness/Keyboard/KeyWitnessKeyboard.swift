@@ -21,48 +21,6 @@ class KeyWitnessKeyboard: UIInputViewController {
     private var pendingTouches: [UIButton: (key: String, downTime: TimeInterval, x: CGFloat, y: CGFloat, force: CGFloat, radius: CGFloat)] = [:]
     private var isShifted = false
     private weak var attestButton: UIButton?
-    private weak var faceButton: UIButton?
-    private var lockOverlay: UIView?
-    private var isUnlocked = false
-
-    // MARK: - Biometric Session
-
-    /// Seconds since last biometric verification, or nil if never verified.
-    private var biometricAge: TimeInterval? {
-        let defaults = UserDefaults(suiteName: "group.io.keywitness")
-        guard let timestamp = defaults?.object(forKey: "faceIdVerifiedAt") as? Date else {
-            return nil
-        }
-        return Date().timeIntervalSince(timestamp)
-    }
-
-    /// Whether biometric session is valid for general keyboard use (10 min).
-    private var sessionValid: Bool {
-        guard let age = biometricAge else { return false }
-        return age < 600
-    }
-
-    /// Whether a one-time attest token is available and within the 2-minute window.
-    private var hasAttestToken: Bool {
-        let defaults = UserDefaults(suiteName: "group.io.keywitness")
-        guard let created = defaults?.object(forKey: "attestTokenCreatedAt") as? Date else {
-            return false
-        }
-        let age = Date().timeIntervalSince(created)
-        // Enforce 2-minute expiry
-        return age < 120
-    }
-
-    /// Consume the one-time attest token.
-    private func consumeAttestToken() {
-        let defaults = UserDefaults(suiteName: "group.io.keywitness")
-        defaults?.removeObject(forKey: "attestTokenCreatedAt")
-    }
-
-    /// Whether biometric was verified at all (for the faceIdVerified flag in attestation).
-    private var sessionFaceIdVerified: Bool {
-        return sessionValid
-    }
 
     // MARK: - Layout Constants
 
@@ -93,113 +51,6 @@ class KeyWitnessKeyboard: UIInputViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         setupKeyboard()
-        setupLockOverlay()
-    }
-
-    override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
-        // Re-check biometric session each time keyboard appears
-        if sessionValid {
-            unlockKeyboard(animated: false)
-        } else {
-            showLockOverlay(animated: false)
-        }
-        updateFaceButtonState()
-    }
-
-    // MARK: - Lock Overlay
-
-    private func setupLockOverlay() {
-        guard let inputView = self.inputView else { return }
-
-        let overlay = UIView()
-        overlay.backgroundColor = keyboardBackground
-        overlay.translatesAutoresizingMaskIntoConstraints = false
-        inputView.addSubview(overlay)
-        NSLayoutConstraint.activate([
-            overlay.topAnchor.constraint(equalTo: inputView.topAnchor),
-            overlay.leadingAnchor.constraint(equalTo: inputView.leadingAnchor),
-            overlay.trailingAnchor.constraint(equalTo: inputView.trailingAnchor),
-            overlay.bottomAnchor.constraint(equalTo: inputView.bottomAnchor),
-        ])
-
-        let stack = UIStackView()
-        stack.axis = .vertical
-        stack.spacing = 8
-        stack.alignment = .center
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        overlay.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
-            stack.centerYAnchor.constraint(equalTo: overlay.centerYAnchor),
-        ])
-
-        // Shield + key icon (SF Symbol or text fallback)
-        let iconLabel = UILabel()
-        iconLabel.text = "🔐"
-        iconLabel.font = UIFont.systemFont(ofSize: 36)
-        stack.addArrangedSubview(iconLabel)
-
-        let titleLabel = UILabel()
-        titleLabel.text = "KeyWitness"
-        titleLabel.font = UIFont.systemFont(ofSize: 18, weight: .semibold)
-        titleLabel.textColor = .white
-        stack.addArrangedSubview(titleLabel)
-
-        let subtitleLabel = UILabel()
-        subtitleLabel.text = "Tap to unlock with Face ID / Touch ID"
-        subtitleLabel.font = UIFont.systemFont(ofSize: 13)
-        subtitleLabel.textColor = UIColor.lightGray
-        stack.addArrangedSubview(subtitleLabel)
-
-        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(lockOverlayTapped))
-        overlay.addGestureRecognizer(tapGesture)
-
-        self.lockOverlay = overlay
-        overlay.isHidden = sessionValid
-        isUnlocked = sessionValid
-    }
-
-    @objc private func lockOverlayTapped() {
-        if sessionValid {
-            unlockKeyboard(animated: true)
-        } else {
-            // Update subtitle to direct user to the app
-            if let stack = lockOverlay?.subviews.first(where: { $0 is UIStackView }) as? UIStackView,
-               let subtitle = stack.arrangedSubviews.last as? UILabel {
-                subtitle.text = "Open KeyWitness app to verify"
-                subtitle.textColor = UIColor(red: 1.0, green: 0.6, blue: 0.2, alpha: 1.0)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                    subtitle.text = "Tap to unlock with Face ID / Touch ID"
-                    subtitle.textColor = .lightGray
-                }
-            }
-        }
-    }
-
-    private func unlockKeyboard(animated: Bool) {
-        isUnlocked = true
-        if animated {
-            UIView.animate(withDuration: 0.2) {
-                self.lockOverlay?.alpha = 0
-            } completion: { _ in
-                self.lockOverlay?.isHidden = true
-                self.lockOverlay?.alpha = 1
-            }
-        } else {
-            lockOverlay?.isHidden = true
-        }
-    }
-
-    private func showLockOverlay(animated: Bool) {
-        isUnlocked = false
-        lockOverlay?.isHidden = false
-        if animated {
-            lockOverlay?.alpha = 0
-            UIView.animate(withDuration: 0.2) {
-                self.lockOverlay?.alpha = 1
-            }
-        }
     }
 
     // MARK: - Keyboard Setup
@@ -235,7 +86,7 @@ class KeyWitnessKeyboard: UIInputViewController {
         // Row 3: Shift + Z X C V B N M + Delete
         container.addArrangedSubview(makeThirdRow())
 
-        // Row 4: Globe / 123 / Space / Attest / Return
+        // Row 4: Globe / Space / Attest / Return
         container.addArrangedSubview(makeBottomRow())
 
         rowStackView = container
@@ -320,14 +171,6 @@ class KeyWitnessKeyboard: UIInputViewController {
         space.accessibilityIdentifier = "space"
         space.heightAnchor.constraint(equalToConstant: keyHeight).isActive = true
         row.addArrangedSubview(space)
-
-        // Face ID / Touch ID button
-        let faceBtn = makeKeyButton(title: "🔒", background: specialKeyBackground)
-        faceBtn.addTarget(self, action: #selector(faceTapped), for: .touchUpInside)
-        faceBtn.widthAnchor.constraint(equalToConstant: 38).isActive = true
-        faceBtn.heightAnchor.constraint(equalToConstant: keyHeight).isActive = true
-        self.faceButton = faceBtn
-        row.addArrangedSubview(faceBtn)
 
         // Attest button
         let attest = makeKeyButton(title: "Attest", background: attestBackground)
@@ -495,46 +338,6 @@ class KeyWitnessKeyboard: UIInputViewController {
         }
     }
 
-    // MARK: - Face ID Notification
-
-    @objc private func faceTapped() {
-        if hasAttestToken {
-            // Already verified — flash green
-            faceButton?.setTitle("✅", for: .normal)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                self.updateFaceButtonState()
-            }
-            return
-        }
-
-        // Send a local notification that opens the container app
-        let content = UNMutableNotificationContent()
-        content.title = "KeyWitness"
-        content.body = "Tap to verify Face ID / Touch ID for attestation"
-        content.sound = .default
-
-        let request = UNNotificationRequest(
-            identifier: "keywitness-faceid-\(UUID().uuidString)",
-            content: content,
-            trigger: nil  // deliver immediately
-        )
-
-        UNUserNotificationCenter.current().add(request) { [weak self] error in
-            DispatchQueue.main.async {
-                if error == nil {
-                    self?.faceButton?.setTitle("📤", for: .normal)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                        self?.updateFaceButtonState()
-                    }
-                }
-            }
-        }
-    }
-
-    private func updateFaceButtonState() {
-        faceButton?.setTitle(hasAttestToken ? "🔓" : "🔒", for: .normal)
-    }
-
     // MARK: - Attestation
 
     @objc private func attestTapped() {
@@ -547,18 +350,11 @@ class KeyWitnessKeyboard: UIInputViewController {
 
         setAttestButtonLoading(true)
 
-        // Consume the one-time attest token if available
-        let faceIdVerified = hasAttestToken
-        if faceIdVerified {
-            consumeAttestToken()
-            updateFaceButtonState()
-        }
-
         do {
             let (attestationBlock, encryptionKey) = try AttestationBuilder.createAttestation(
                 cleartext: cleartext,
                 keystrokeEvents: keystrokeEvents,
-                faceIdVerified: faceIdVerified
+                faceIdVerified: false
             )
 
             uploadAttestation(attestationBlock, encryptionKey: encryptionKey) { [weak self] result in
@@ -567,7 +363,7 @@ class KeyWitnessKeyboard: UIInputViewController {
                     self.setAttestButtonLoading(false)
 
                     switch result {
-                    case .success(let url):
+                    case .success(let (url, shortId)):
                         let before = self.textDocumentProxy.documentContextBeforeInput ?? ""
                         if !before.isEmpty && !before.hasSuffix(" ") && !before.hasSuffix("\n") {
                             self.textDocumentProxy.insertText(" ")
@@ -577,6 +373,11 @@ class KeyWitnessKeyboard: UIInputViewController {
                             .replacingOccurrences(of: "https://www.", with: "")
                             .replacingOccurrences(of: "https://", with: "")
                         self.textDocumentProxy.insertText(shortURL)
+
+                        // Store shortId for Face ID verification and fire notification
+                        self.storePendingBiometric(shortId: shortId)
+                        self.fireBiometricNotification(shortId: shortId)
+
                     case .failure:
                         self.textDocumentProxy.insertText("\n\n" + attestationBlock)
                     }
@@ -589,20 +390,43 @@ class KeyWitnessKeyboard: UIInputViewController {
         }
     }
 
+    // MARK: - Biometric Notification
+
+    /// Store the shortId in App Group so the container app can pick it up for Face ID verification.
+    private func storePendingBiometric(shortId: String) {
+        let defaults = UserDefaults(suiteName: "group.io.keywitness")
+        defaults?.set(shortId, forKey: "pendingBiometricShortId")
+        defaults?.set(Date(), forKey: "pendingBiometricCreatedAt")
+    }
+
+    /// Fire a local notification giving the user 30 seconds to verify with Face ID.
+    private func fireBiometricNotification(shortId: String) {
+        let content = UNMutableNotificationContent()
+        content.title = "KeyWitness"
+        content.body = "Tap to verify with Face ID — 30 seconds to sign"
+        content.sound = .default
+        content.userInfo = ["shortId": shortId]
+
+        let request = UNNotificationRequest(
+            identifier: "keywitness-biometric-\(shortId)",
+            content: content,
+            trigger: nil  // deliver immediately
+        )
+
+        UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
+    }
+
     // MARK: - Upload Helper
 
     /// Uploads the attestation block to the KeyWitness server.
     ///
-    /// Requires `RequestsOpenAccess = true` in Info.plist and "Allow Full Access"
-    /// enabled by the user in Settings > General > Keyboard > KeyWitness.
-    ///
     /// - Parameters:
     ///   - attestationBlock: The PEM-style attestation text block.
     ///   - encryptionKey: The base64url-encoded AES key, appended as a URL fragment.
-    ///   - completion: Called with `.success(url)` or `.failure(error)`.
+    ///   - completion: Called with `.success((url, shortId))` or `.failure(error)`.
     private func uploadAttestation(_ attestationBlock: String,
                                    encryptionKey: String,
-                                   completion: @escaping (Result<String, Error>) -> Void) {
+                                   completion: @escaping (Result<(String, String), Error>) -> Void) {
         let endpoint = Self.serverBaseURL + "/api/attestations"
 
         guard let url = URL(string: endpoint) else {
@@ -637,9 +461,10 @@ class KeyWitnessKeyboard: UIInputViewController {
 
             do {
                 if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                   let attestationURL = json["url"] as? String {
+                   let attestationURL = json["url"] as? String,
+                   let shortId = json["id"] as? String {
                     // Append encryption key as URL fragment — the server never sees it
-                    completion(.success(attestationURL + "#" + encryptionKey))
+                    completion(.success((attestationURL + "#" + encryptionKey, shortId)))
                 } else {
                     completion(.failure(UploadError.unexpectedResponse))
                 }
