@@ -12,13 +12,17 @@ function generateShortId(length = 10): string {
 }
 
 export const upload = mutation({
-  args: { attestation: v.string() },
+  args: {
+    attestation: v.string(),
+    deviceVerified: v.optional(v.boolean()),
+  },
   handler: async (ctx, args) => {
     const shortId = generateShortId();
     await ctx.db.insert("attestations", {
       shortId,
       attestation: args.attestation,
       createdAt: Date.now(),
+      deviceVerified: args.deviceVerified || undefined,
     });
     return {
       id: shortId,
@@ -41,6 +45,7 @@ export const getByShortId = query({
       biometricSignature: doc.biometricSignature,
       biometricPublicKey: doc.biometricPublicKey,
       biometricTimestamp: doc.biometricTimestamp,
+      deviceVerified: doc.deviceVerified,
     };
   },
 });

@@ -36,6 +36,7 @@ class MainViewController: UIViewController {
         setupUI()
         loadPublicKey()
         requestNotificationPermission()
+        setupAppAttest()
 
         // Set ourselves as the notification delegate to handle taps
         UNUserNotificationCenter.current().delegate = self
@@ -59,6 +60,32 @@ class MainViewController: UIViewController {
     }
 
     override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
+
+    // MARK: - App Attest Setup
+
+    private func setupAppAttest() {
+        guard AppAttestManager.shared.isSupported else {
+            updateBiometricStatus("Device verification not available on this device", color: .lightGray)
+            clearBiometricStatusAfterDelay()
+            return
+        }
+        guard !AppAttestManager.shared.isAttested else { return }
+
+        Task {
+            do {
+                try await AppAttestManager.shared.setupIfNeeded()
+                await MainActor.run {
+                    updateBiometricStatus("Device verified successfully", color: .systemGreen)
+                    clearBiometricStatusAfterDelay()
+                }
+            } catch {
+                await MainActor.run {
+                    updateBiometricStatus("Device verification failed. Please try again later.", color: .systemRed)
+                    clearBiometricStatusAfterDelay()
+                }
+            }
+        }
+    }
 
     // MARK: - Pending Biometric Check
 
@@ -101,7 +128,7 @@ class MainViewController: UIViewController {
         updateBiometricStatus("Verifying identity...", color: .systemYellow)
 
         context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics,
-                               localizedReason: "Verify your identity for attestation \(shortId)") { [weak self] success, _ in
+                               localizedReason: "Confirm it was you who typed this message") { [weak self] success, _ in
             DispatchQueue.main.async {
                 if success {
                     self?.uploadBiometricSignature(shortId: shortId)
@@ -232,7 +259,7 @@ class MainViewController: UIViewController {
         contentStack.addArrangedSubview(titleLabel)
 
         // Subtitle
-        subtitleLabel.text = "Cryptographic Keyboard"
+        subtitleLabel.text = "Prove your words are yours."
         subtitleLabel.font = UIFont.systemFont(ofSize: 17, weight: .regular)
         subtitleLabel.textColor = UIColor.lightGray
         subtitleLabel.textAlignment = .center
@@ -262,7 +289,7 @@ class MainViewController: UIViewController {
         contentStack.addArrangedSubview(instructionsCard)
 
         let header = UILabel()
-        header.text = "Setup"
+        header.text = "Getting Started"
         header.font = UIFont.systemFont(ofSize: 20, weight: .semibold)
         header.textColor = .white
 
@@ -270,14 +297,13 @@ class MainViewController: UIViewController {
         instructionsLabel.font = UIFont.systemFont(ofSize: 15, weight: .regular)
         instructionsLabel.textColor = UIColor.lightGray
         instructionsLabel.text = """
-        1. Open Settings > General > Keyboard > Keyboards
-        2. Tap "Add New Keyboard..."
-        3. Select "KeyWitness" from the list
-        4. Enable "Allow Full Access" for network features
-        5. Switch to the KeyWitness keyboard in any app
-        6. Type your message, then tap "Attest" to sign it
+        1. Go to Settings > General > Keyboard > Keyboards
+        2. Tap "Add New Keyboard..." and choose KeyWitness
+        3. Turn on "Allow Full Access" so it can upload
+        4. In any app, switch to the KeyWitness keyboard
+        5. Type something, then tap "Attest" to seal it
 
-        After attesting, you'll get a notification to verify with Face ID. Tap the notification within 30 seconds to add biometric proof to your attestation.
+        You'll get a notification to confirm with Face ID. Tap it within 30 seconds to prove it was really you.
         """
 
         let stack = UIStackView(arrangedSubviews: [header, instructionsLabel])
@@ -300,7 +326,7 @@ class MainViewController: UIViewController {
         card.translatesAutoresizingMaskIntoConstraints = false
         contentStack.addArrangedSubview(card)
 
-        publicKeyHeader.text = "Your Public Key"
+        publicKeyHeader.text = "Your Identity"
         publicKeyHeader.font = UIFont.systemFont(ofSize: 20, weight: .semibold)
         publicKeyHeader.textColor = .white
 
@@ -310,7 +336,7 @@ class MainViewController: UIViewController {
         publicKeyLabel.text = "Loading..."
         publicKeyLabel.textAlignment = .center
 
-        copyKeyButton.setTitle("Copy Public Key", for: .normal)
+        copyKeyButton.setTitle("Copy Identity Key", for: .normal)
         copyKeyButton.titleLabel?.font = UIFont.systemFont(ofSize: 15, weight: .medium)
         copyKeyButton.tintColor = accentColor
         copyKeyButton.addTarget(self, action: #selector(copyPublicKey), for: .touchUpInside)
@@ -321,7 +347,7 @@ class MainViewController: UIViewController {
         registerKeyButton.addTarget(self, action: #selector(registerPublicKey), for: .touchUpInside)
 
         let description = UILabel()
-        description.text = "Share this key to let others verify your attestations."
+        description.text = "Register your name so people know this key belongs to you."
         description.font = UIFont.systemFont(ofSize: 13, weight: .regular)
         description.textColor = UIColor.lightGray
         description.textAlignment = .center
@@ -348,7 +374,7 @@ class MainViewController: UIViewController {
         card.translatesAutoresizingMaskIntoConstraints = false
         contentStack.addArrangedSubview(card)
 
-        testHeader.text = "Test Keyboard"
+        testHeader.text = "Try It Out"
         testHeader.font = UIFont.systemFont(ofSize: 20, weight: .semibold)
         testHeader.textColor = .white
 
@@ -358,7 +384,7 @@ class MainViewController: UIViewController {
         testTextView.layer.cornerRadius = 8
         testTextView.textContainerInset = UIEdgeInsets(top: 12, left: 8, bottom: 12, right: 8)
         testTextView.isScrollEnabled = true
-        testTextView.text = "Tap here and switch to KeyWitness keyboard..."
+        testTextView.text = "Tap here, switch to KeyWitness keyboard, and type something..."
         testTextView.textColor = .gray
         testTextView.delegate = self
         testTextView.heightAnchor.constraint(greaterThanOrEqualToConstant: 150).isActive = true
@@ -412,7 +438,7 @@ class MainViewController: UIViewController {
             return
         }
 
-        let alert = UIAlertController(title: "Register Public Key", message: "Choose a display name that others will see when verifying your attestations.", preferredStyle: .alert)
+        let alert = UIAlertController(title: "Register Your Name", message: "Choose a name so people can see who wrote the attested text.", preferredStyle: .alert)
         alert.addTextField { textField in
             textField.placeholder = "Display name"
             textField.text = UIDevice.current.name
@@ -487,7 +513,7 @@ extension MainViewController: UITextViewDelegate {
 
     func textViewDidEndEditing(_ textView: UITextView) {
         if textView.text.isEmpty {
-            textView.text = "Tap here and switch to KeyWitness keyboard..."
+            textView.text = "Tap here, switch to KeyWitness keyboard, and type something..."
             textView.textColor = .gray
         }
     }

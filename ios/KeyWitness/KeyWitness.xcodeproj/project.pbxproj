@@ -18,6 +18,8 @@
 		A1B2C3D4E5F60071000A0001 /* AttestationBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000A000A0001 /* AttestationBuilder.swift */; };
 		A1B2C3D4E5F60072000A0001 /* CryptoKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000C000A0001 /* CryptoKit.framework */; };
 		A1B2C3D4E5F60090000A0001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60091000A0001 /* Assets.xcassets */; };
+		A1B2C3D4E5F60092000A0001 /* AppAttestManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60093000A0001 /* AppAttestManager.swift */; };
+		A1B2C3D4E5F60094000A0001 /* AppAttestHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60095000A0001 /* AppAttestHelper.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -58,6 +60,8 @@
 		A1B2C3D4E5F60080000A0001 /* KeyWitness.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = KeyWitness.entitlements; sourceTree = "<group>"; };
 		A1B2C3D4E5F60081000A0001 /* KeyWitnessKeyboard.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = KeyWitnessKeyboard.entitlements; sourceTree = "<group>"; };
 		A1B2C3D4E5F60091000A0001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A1B2C3D4E5F60093000A0001 /* AppAttestManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAttestManager.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60095000A0001 /* AppAttestHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAttestHelper.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -95,6 +99,7 @@
 			children = (
 				A1B2C3D4E5F60002000A0001 /* AppDelegate.swift */,
 				A1B2C3D4E5F60004000A0001 /* MainViewController.swift */,
+				A1B2C3D4E5F60093000A0001 /* AppAttestManager.swift */,
 				A1B2C3D4E5F60091000A0001 /* Assets.xcassets */,
 				A1B2C3D4E5F60016000A0001 /* Info.plist */,
 				A1B2C3D4E5F60080000A0001 /* KeyWitness.entitlements */,
@@ -108,6 +113,7 @@
 				A1B2C3D4E5F60006000A0001 /* KeyWitnessKeyboard.swift */,
 				A1B2C3D4E5F60008000A0001 /* CryptoEngine.swift */,
 				A1B2C3D4E5F6000A000A0001 /* AttestationBuilder.swift */,
+				A1B2C3D4E5F60095000A0001 /* AppAttestHelper.swift */,
 				A1B2C3D4E5F60015000A0001 /* Info.plist */,
 				A1B2C3D4E5F60081000A0001 /* KeyWitnessKeyboard.entitlements */,
 			);
@@ -234,6 +240,7 @@
 				A1B2C3D4E5F60003000A0001 /* MainViewController.swift in Sources */,
 				A1B2C3D4E5F60070000A0001 /* CryptoEngine.swift in Sources */,
 				A1B2C3D4E5F60071000A0001 /* AttestationBuilder.swift in Sources */,
+				A1B2C3D4E5F60092000A0001 /* AppAttestManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -244,6 +251,7 @@
 				A1B2C3D4E5F60005000A0001 /* KeyWitnessKeyboard.swift in Sources */,
 				A1B2C3D4E5F60007000A0001 /* CryptoEngine.swift in Sources */,
 				A1B2C3D4E5F60009000A0001 /* AttestationBuilder.swift in Sources */,
+				A1B2C3D4E5F60094000A0001 /* AppAttestHelper.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

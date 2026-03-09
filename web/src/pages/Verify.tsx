@@ -130,8 +130,7 @@ export default function Verify({ shortId }: { shortId?: string }) {
             KeyWitness
           </h1>
           <p className="text-gray-400 text-lg">
-            Cryptographic text verification. Paste an attestation block below to
-            verify its authenticity.
+            Verify that a message is authentic and hasn't been changed.
           </p>
         </div>
 
@@ -157,7 +156,7 @@ export default function Verify({ shortId }: { shortId?: string }) {
             disabled={verifying || !input.trim()}
             className="px-6 py-2.5 bg-white text-black font-medium rounded-lg hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
-            {verifying ? "Verifying..." : "Verify"}
+            {verifying ? "Checking..." : "Verify"}
           </button>
           <span className="ml-3 text-gray-600 text-sm">
             or press Cmd/Ctrl + Enter
@@ -196,10 +195,17 @@ export default function Verify({ shortId }: { shortId?: string }) {
                 }`}
               >
                 {status === "verified"
-                  ? "VERIFIED"
+                  ? "AUTHENTIC"
                   : status === "invalid"
-                    ? "INVALID"
+                    ? "TAMPERED"
                     : "ERROR"}
+              </span>
+              <span className="text-gray-500 text-xs">
+                {status === "verified"
+                  ? "This message is exactly what was typed. Nothing has been changed."
+                  : status === "invalid"
+                    ? "Something doesn't match. This message may have been altered."
+                    : ""}
               </span>
             </div>
 
@@ -217,10 +223,10 @@ export default function Verify({ shortId }: { shortId?: string }) {
                 {result.cleartext ? (
                   <div className="px-5 py-3 bg-[#111111]">
                     <div className="text-xs text-gray-500 uppercase tracking-wider mb-1 flex items-center gap-2">
-                      Cleartext
+                      Message
                       {result.encrypted && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/50 text-blue-400 font-medium uppercase">
-                          Encrypted
+                          Decrypted
                         </span>
                       )}
                     </div>
@@ -231,19 +237,19 @@ export default function Verify({ shortId }: { shortId?: string }) {
                 ) : result.encrypted && !result.cleartext ? (
                   <div className="px-5 py-3 bg-[#111111]">
                     <div className="text-xs text-gray-500 uppercase tracking-wider mb-1 flex items-center gap-2">
-                      Cleartext
+                      Message
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/50 text-blue-400 font-medium uppercase">
-                        Encrypted
+                        Locked
                       </span>
                     </div>
                     <div className="text-gray-500 text-sm italic mb-3">
                       {result.decryptionFailed
-                        ? "Decryption failed — wrong key or corrupted data."
-                        : "Cleartext is encrypted. Provide the decryption key in the URL fragment or paste the original text below."}
+                        ? "Couldn't unlock the message. The link may be incomplete or the key is wrong."
+                        : "This message is encrypted. Open the full link from the sender, or paste the original text below to check if it matches."}
                     </div>
                     <textarea
                       className="w-full h-24 bg-[#0a0a0a] border border-gray-700 rounded-lg p-3 font-mono text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-gray-600 focus:ring-1 focus:ring-gray-600 resize-y mb-2"
-                      placeholder="Paste the original cleartext here to verify it matches..."
+                      placeholder="Paste the original text here to check if it matches..."
                       value={manualCleartext}
                       onChange={(e) => setManualCleartext(e.target.value)}
                     />
@@ -252,53 +258,102 @@ export default function Verify({ shortId }: { shortId?: string }) {
                       disabled={verifying || !manualCleartext.trim()}
                       className="px-4 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                     >
-                      Verify with cleartext
+                      Check match
                     </button>
                   </div>
                 ) : (
-                  <Field label="Cleartext" value={result.cleartext} />
+                  <Field label="Message" value={result.cleartext} />
                 )}
-                <Field
-                  label="Device ID"
-                  value={result.deviceId}
-                  mono
-                />
+
+                {/* Who wrote it */}
+                {result.publicKey && (
+                  <div className="px-5 py-3 bg-[#111111]">
+                    <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">
+                      Written By
+                    </div>
+                    <div
+                      className={`text-sm font-medium ${
+                        keyRecord
+                          ? "text-green-400"
+                          : keyRecord === null
+                            ? "text-gray-400"
+                            : "text-gray-500"
+                      }`}
+                    >
+                      {keyRecord
+                        ? keyRecord.name
+                        : keyRecord === null
+                          ? "Unknown sender (key not registered)"
+                          : "Looking up..."}
+                    </div>
+                  </div>
+                )}
+
+                {/* Device */}
                 <div className="px-5 py-3 bg-[#111111]">
                   <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">
-                    Biometric Verification
+                    Device
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-gray-200 text-sm">
+                      {result.deviceId}
+                    </span>
+                    {attestationDoc?.deviceVerified ? (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-900/50 text-green-400 font-medium">
+                        Real Apple device
+                      </span>
+                    ) : result?.appAttestPresent ? (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-900/50 text-yellow-400 font-medium">
+                        Unconfirmed
+                      </span>
+                    ) : (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-800 text-gray-500 font-medium">
+                        Not verified
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Face ID */}
+                <div className="px-5 py-3 bg-[#111111]">
+                  <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">
+                    Face ID
                   </div>
                   {attestationDoc?.biometricSignature ? (
-                    <div>
+                    <div className="flex items-center gap-2">
                       <span className="text-green-400 text-sm font-medium">
-                        Verified with Face ID / Touch ID
+                        Confirmed by the sender
                       </span>
                       {attestationDoc.biometricTimestamp && (
-                        <span className="text-gray-500 text-xs ml-2">
-                          {Math.round((attestationDoc.biometricTimestamp - attestationDoc.createdAt) / 1000)}s after attestation
+                        <span className="text-gray-500 text-xs">
+                          {Math.round((attestationDoc.biometricTimestamp - attestationDoc.createdAt) / 1000)}s after typing
                         </span>
                       )}
                     </div>
                   ) : attestationDoc && !attestationDoc.biometricSignature ? (
-                    <span className="text-yellow-400 text-sm">
-                      Not verified — no biometric proof attached
+                    <span className="text-gray-500 text-sm">
+                      Not confirmed
                     </span>
                   ) : (
                     <span className="text-gray-500 text-sm">Checking...</span>
                   )}
                 </div>
+
+                {/* When */}
                 <Field
-                  label="Timestamp"
+                  label="When"
                   value={
                     result.timestamp
                       ? formatTimestamp(result.timestamp)
                       : undefined
                   }
                 />
-                {/* Public Key Fingerprint with known key support */}
+
+                {/* Signing Key */}
                 {result.publicKeyFingerprint && (
                   <div className="px-5 py-3 bg-[#111111]">
                     <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">
-                      Public Key Fingerprint
+                      Signing Key
                     </div>
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-gray-200 text-sm font-mono break-all">
@@ -306,7 +361,7 @@ export default function Verify({ shortId }: { shortId?: string }) {
                       </span>
                       {result.publicKey && knownKeyName ? (
                         <span className="inline-flex items-center gap-1 text-sm text-green-400 font-medium">
-                          Known as: {knownKeyName}
+                          {knownKeyName}
                           <button
                             onClick={() => {
                               removeKnownKey(result.publicKey!);
@@ -314,7 +369,7 @@ export default function Verify({ shortId }: { shortId?: string }) {
                               setKnownKeyVersion((v) => v + 1);
                             }}
                             className="text-gray-500 hover:text-red-400 text-xs ml-1"
-                            title="Remove known key"
+                            title="Forget this key"
                           >
                             x
                           </button>
@@ -324,7 +379,7 @@ export default function Verify({ shortId }: { shortId?: string }) {
                           onClick={() => setSavingKeyName(true)}
                           className="text-xs text-gray-500 hover:text-blue-400 transition-colors"
                         >
-                          Save as known
+                          Remember this key
                         </button>
                       ) : null}
                     </div>
@@ -333,7 +388,7 @@ export default function Verify({ shortId }: { shortId?: string }) {
                         <input
                           type="text"
                           className="bg-[#0a0a0a] border border-gray-700 rounded px-2 py-1 text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-gray-600"
-                          placeholder="Enter a name..."
+                          placeholder="Name this person..."
                           value={keyNameInput}
                           onChange={(e) => setKeyNameInput(e.target.value)}
                           onKeyDown={(e) => {
@@ -378,33 +433,6 @@ export default function Verify({ shortId }: { shortId?: string }) {
                     )}
                   </div>
                 )}
-                {result.publicKey && (
-                  <div className="px-5 py-3 bg-[#111111]">
-                    <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">
-                      Registered Identity
-                    </div>
-                    <div
-                      className={`text-sm font-medium ${
-                        keyRecord
-                          ? "text-green-400"
-                          : keyRecord === null
-                            ? "text-yellow-400"
-                            : "text-gray-500"
-                      }`}
-                    >
-                      {keyRecord
-                        ? `Registered to: ${keyRecord.name}`
-                        : keyRecord === null
-                          ? "Unregistered key"
-                          : "Looking up key..."}
-                    </div>
-                  </div>
-                )}
-                <Field
-                  label="Biometrics Hash"
-                  value={result.keystrokeBiometricsHash || "N/A"}
-                  mono
-                />
               </div>
             )}
 
@@ -419,30 +447,33 @@ export default function Verify({ shortId }: { shortId?: string }) {
         {/* Explanation */}
         <div className="border border-gray-800 rounded-lg p-6 mb-10">
           <h2 className="text-lg font-semibold text-white mb-4">
-            What does this prove?
+            How does this work?
           </h2>
-          <div className="space-y-3 text-sm text-gray-400">
+          <div className="space-y-4 text-sm text-gray-400">
+            <p>
+              KeyWitness is a keyboard for iPhone that seals every message you type with a
+              digital signature. When someone receives your message, they can verify here
+              that it really came from you and hasn't been edited.
+            </p>
             <div>
               <h3 className="text-gray-300 font-medium mb-1">
-                It proves:
+                A green "Authentic" result means:
               </h3>
               <ul className="list-disc list-inside space-y-1 ml-1">
                 <li>
-                  The text was typed on a specific device with the given device
-                  ID
+                  The message is word-for-word what was originally typed
                 </li>
                 <li>
-                  The text has not been modified since it was signed
+                  It was typed on the device shown above
                 </li>
                 <li>
-                  The signing key corresponds to the displayed fingerprint
+                  Nobody has modified it since it was written
                 </li>
                 <li>
-                  The attestation was created at the indicated timestamp
+                  If device-verified: it came from the real KeyWitness app on a genuine iPhone, not a fake
                 </li>
                 <li>
-                  The server never has access to the cleartext — only the
-                  encrypted form is stored
+                  If Face ID confirmed: the device owner personally verified the message
                 </li>
               </ul>
             </div>
@@ -451,12 +482,9 @@ export default function Verify({ shortId }: { shortId?: string }) {
                 It does not prove:
               </h3>
               <ul className="list-disc list-inside space-y-1 ml-1">
-                <li>The identity of the person who typed the text</li>
+                <li>Who the person behind the device is (unless they've registered their name)</li>
                 <li>
-                  That the device has not been compromised
-                </li>
-                <li>
-                  That the text was typed voluntarily
+                  That the message was typed voluntarily
                 </li>
               </ul>
             </div>
@@ -466,12 +494,11 @@ export default function Verify({ shortId }: { shortId?: string }) {
         {/* Footer */}
         <footer className="text-center text-gray-600 text-xs py-6 border-t border-gray-800 space-y-2">
           <div>
-            All verification is performed client-side in your browser. No
-            attestation data is sent to any server.
+            Verification happens entirely in your browser. Nothing is sent to any server.
           </div>
           <div>
             <a href="/how" className="text-gray-500 hover:text-gray-300 transition-colors">
-              How does KeyWitness work?
+              Learn more about KeyWitness
             </a>
           </div>
         </footer>
@@ -516,10 +543,12 @@ function KeystrokeTimeline({
 
   return (
     <div className="border-t border-gray-800 bg-[#111111] px-5 py-4">
-      <div className="text-xs text-gray-500 uppercase tracking-wider mb-3">
-        Keystroke Timeline ({Math.round(totalDuration).toLocaleString()}ms
-        total)
+      <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">
+        Typing Pattern
       </div>
+      <p className="text-xs text-gray-600 mb-3">
+        How each key was typed ({(totalDuration / 1000).toFixed(1)}s total). This pattern is unique to the typist, like a fingerprint.
+      </p>
       <div className="space-y-1">
         {timings.map((timing, i) => {
           const dwell = Math.round(timing.upAt - timing.downAt);
@@ -555,11 +584,6 @@ function KeystrokeTimeline({
               <span className="text-gray-500 shrink-0 tabular-nums">
                 {dwell}ms
                 {gap !== null ? <span className="text-gray-600"> +{gap}</span> : ""}
-                {hasBiometrics && timing.force !== undefined && (
-                  <span className="text-gray-600 ml-2">
-                    f:{timing.force.toFixed(2)} r:{timing.radius?.toFixed(1)}
-                  </span>
-                )}
               </span>
             </div>
           );
@@ -567,17 +591,18 @@ function KeystrokeTimeline({
       </div>
       {hasBiometrics && (
         <div className="mt-4 border-t border-gray-800 pt-3">
-          <div className="text-xs text-gray-500 uppercase tracking-wider mb-2">
-            Touch Biometrics
+          <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">
+            Touch Map
           </div>
+          <p className="text-[10px] text-gray-600 mb-2">
+            Where each key was pressed. Brightness shows how firmly it was touched.
+          </p>
           <div className="flex flex-wrap gap-1">
             {timings.map((t, i) => {
               const displayKey = t.key === " " ? "\u2423" : t.key;
-              // Use radius for opacity (varies with finger contact area), fallback to force
               const maxRadius = Math.max(...timings.map((tt) => tt.radius ?? 0), 1);
               const radiusNorm = (t.radius ?? 0) / maxRadius;
               const opacity = Math.max(0.25, radiusNorm);
-              // Offset dot within tile based on x/y position on key (normalized to ~0-40px key area)
               const dotX = t.x !== undefined ? Math.min(Math.max(t.x / 2, 2), 22) : 12;
               const dotY = t.y !== undefined ? Math.min(Math.max(t.y / 2, 2), 22) : 12;
               return (
@@ -589,7 +614,7 @@ function KeystrokeTimeline({
                     height: 28,
                     backgroundColor: `rgba(59, 130, 246, ${opacity})`,
                   }}
-                  title={`x:${t.x?.toFixed(1)} y:${t.y?.toFixed(1)} force:${t.force?.toFixed(3)} radius:${t.radius?.toFixed(1)}`}
+                  title={`Position: (${t.x?.toFixed(1)}, ${t.y?.toFixed(1)}) Force: ${t.force?.toFixed(3)} Radius: ${t.radius?.toFixed(1)}`}
                 >
                   {displayKey}
                   <div
@@ -600,9 +625,6 @@ function KeystrokeTimeline({
               );
             })}
           </div>
-          <p className="text-[10px] text-gray-600 mt-1">
-            Dot = touch position on key. Opacity = contact radius. Hover for details.
-          </p>
         </div>
       )}
     </div>

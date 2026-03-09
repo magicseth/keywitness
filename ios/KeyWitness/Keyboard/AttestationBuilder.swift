@@ -47,6 +47,7 @@ struct EncryptedInnerPayload: Codable {
 /// keystrokeTimings are inside encryptedCleartext, never in the outer envelope.
 struct Attestation: Codable {
     let version: String
+    let appAttestToken: String?
     let cleartextHash: String
     let encryptedCleartext: String
     let deviceId: String
@@ -69,7 +70,8 @@ final class AttestationBuilder {
     /// Returns a tuple of (block: PEM-style attestation text, encryptionKey: base64url AES key).
     static func createAttestation(cleartext: String,
                                   keystrokeEvents: [KeystrokeEvent],
-                                  faceIdVerified: Bool) throws -> (block: String, encryptionKey: String) {
+                                  faceIdVerified: Bool,
+                                  appAttestToken: String? = nil) throws -> (block: String, encryptionKey: String) {
 
         let deviceId = deviceIdentifier()
         let timestamp = iso8601Timestamp()
@@ -97,6 +99,7 @@ final class AttestationBuilder {
         // the ciphertext cannot be swapped without invalidating the signature
         let signingPayload = canonicalSigningPayload(
             version: protocolVersion,
+            appAttestToken: appAttestToken,
             cleartextHash: cleartextHash,
             encryptedCleartext: encryptedCleartext,
             deviceId: deviceId,
@@ -113,6 +116,7 @@ final class AttestationBuilder {
 
         let attestation = Attestation(
             version: protocolVersion,
+            appAttestToken: appAttestToken,
             cleartextHash: cleartextHash,
             encryptedCleartext: encryptedCleartext,
             deviceId: deviceId,
@@ -133,6 +137,7 @@ final class AttestationBuilder {
     /// Builds the canonical JSON signing payload with sorted keys and no whitespace.
     /// This is the exact byte string that gets signed.
     static func canonicalSigningPayload(version: String,
+                                        appAttestToken: String?,
                                         cleartextHash: String,
                                         encryptedCleartext: String,
                                         deviceId: String,
@@ -140,16 +145,22 @@ final class AttestationBuilder {
                                         timestamp: String,
                                         keystrokeBiometricsHash: String) -> String {
         // Manually construct sorted-key JSON to guarantee deterministic output.
-        // Keys in alphabetical order: cleartextHash, deviceId, encryptedCleartext, faceIdVerified, keystrokeBiometricsHash, timestamp, version
-        return "{"
-            + "\"\(jsonEscape("cleartextHash"))\":\"\(jsonEscape(cleartextHash))\","
-            + "\"\(jsonEscape("deviceId"))\":\"\(jsonEscape(deviceId))\","
-            + "\"\(jsonEscape("encryptedCleartext"))\":\"\(jsonEscape(encryptedCleartext))\","
-            + "\"faceIdVerified\":\(faceIdVerified),"
-            + "\"\(jsonEscape("keystrokeBiometricsHash"))\":\"\(jsonEscape(keystrokeBiometricsHash))\","
-            + "\"\(jsonEscape("timestamp"))\":\"\(jsonEscape(timestamp))\","
-            + "\"\(jsonEscape("version"))\":\"\(jsonEscape(version))\""
-            + "}"
+        // Keys in alphabetical order: appAttestToken (if present), cleartextHash, deviceId,
+        // encryptedCleartext, faceIdVerified, keystrokeBiometricsHash, timestamp, version
+        var parts: [String] = []
+
+        if let token = appAttestToken {
+            parts.append("\"appAttestToken\":\"\(jsonEscape(token))\"")
+        }
+        parts.append("\"\(jsonEscape("cleartextHash"))\":\"\(jsonEscape(cleartextHash))\"")
+        parts.append("\"\(jsonEscape("deviceId"))\":\"\(jsonEscape(deviceId))\"")
+        parts.append("\"\(jsonEscape("encryptedCleartext"))\":\"\(jsonEscape(encryptedCleartext))\"")
+        parts.append("\"faceIdVerified\":\(faceIdVerified)")
+        parts.append("\"\(jsonEscape("keystrokeBiometricsHash"))\":\"\(jsonEscape(keystrokeBiometricsHash))\"")
+        parts.append("\"\(jsonEscape("timestamp"))\":\"\(jsonEscape(timestamp))\"")
+        parts.append("\"\(jsonEscape("version"))\":\"\(jsonEscape(version))\"")
+
+        return "{" + parts.joined(separator: ",") + "}"
     }
 
     // MARK: - Keystroke Timings

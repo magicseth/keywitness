@@ -36,6 +36,7 @@ export interface VerificationResult {
   publicKeyFingerprint?: string;
   keystrokeBiometricsHash?: string;
   keystrokeTimings?: KeystrokeTiming[];
+  appAttestPresent?: boolean;  // true if attestation includes App Attest token
   error?: string;
   encrypted?: boolean;       // true for v2
   decryptionFailed?: boolean; // true if key missing/wrong
@@ -293,6 +294,7 @@ export async function verifyAttestation(
       publicKeyFingerprint: fingerprint,
       keystrokeBiometricsHash: attestation.keystrokeBiometricsHash,
       keystrokeTimings,
+      appAttestPresent: !!attestation.appAttestToken,
       encrypted: isV2 ? true : undefined,
       decryptionFailed: decryptionFailed ? true : undefined,
       error: valid

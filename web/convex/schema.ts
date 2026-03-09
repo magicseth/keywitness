@@ -6,13 +6,27 @@ export default defineSchema({
     shortId: v.string(),
     attestation: v.string(),
     createdAt: v.number(),
-    biometricSignature: v.optional(v.string()),   // Ed25519 sig of "keywitness:biometric:<shortId>"
-    biometricPublicKey: v.optional(v.string()),    // base64url public key that signed it
-    biometricTimestamp: v.optional(v.number()),     // Date.now() when biometric was verified
+    biometricSignature: v.optional(v.string()),
+    biometricPublicKey: v.optional(v.string()),
+    biometricTimestamp: v.optional(v.number()),
+    deviceVerified: v.optional(v.boolean()),
   }).index("by_shortId", ["shortId"]),
   keys: defineTable({
-    publicKey: v.string(),      // base64url-encoded Ed25519 public key
-    name: v.string(),           // display name (e.g. "Seth's iPhone")
-    registeredAt: v.number(),   // Date.now()
+    publicKey: v.string(),
+    name: v.string(),
+    registeredAt: v.number(),
   }).index("by_publicKey", ["publicKey"]),
+  appAttestChallenges: defineTable({
+    challenge: v.string(),
+    createdAt: v.number(),
+    used: v.boolean(),
+  }).index("by_challenge", ["challenge"]),
+  appAttestCredentials: defineTable({
+    keyId: v.string(),
+    credentialPublicKey: v.string(),   // base64url P-256 public key (raw, 65 bytes uncompressed)
+    linkedEd25519Key: v.string(),      // The Ed25519 public key this device key is linked to
+    counter: v.number(),               // Assertion counter for replay protection
+    createdAt: v.number(),
+  }).index("by_keyId", ["keyId"])
+    .index("by_linkedEd25519Key", ["linkedEd25519Key"]),
 });

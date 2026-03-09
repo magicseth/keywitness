@@ -350,43 +350,67 @@ class KeyWitnessKeyboard: UIInputViewController {
 
         setAttestButtonLoading(true)
 
-        do {
-            let (attestationBlock, encryptionKey) = try AttestationBuilder.createAttestation(
-                cleartext: cleartext,
-                keystrokeEvents: keystrokeEvents,
-                faceIdVerified: false
-            )
+        // Build attestation in a Task to support async App Attest assertion
+        let events = keystrokeEvents
+        Task {
+            do {
+                // Generate App Attest assertion if available
+                var appAttestToken: String? = nil
+                var appAttestKeyId: String? = nil
+                var appAttestAssertion: String? = nil
+                var appAttestClientData: String? = nil
+                if AppAttestHelper.shared.isAvailable {
+                    let deviceId = AttestationBuilder.deviceIdentifier()
+                    let timestamp = AttestationBuilder.iso8601Timestamp()
+                    let cleartextHash = CryptoEngine.sha256Base64URL(Data(cleartext.utf8))
+                    let clientDataString = "\(cleartextHash):\(deviceId):\(timestamp)"
+                    let clientData = clientDataString.data(using: .utf8)!
+                    let assertion = try await AppAttestHelper.shared.generateAssertion(for: clientData)
+                    let assertionB64 = CryptoEngine.base64URLEncode(assertion)
+                    appAttestToken = assertionB64
+                    appAttestAssertion = assertionB64
+                    appAttestClientData = clientDataString
+                    appAttestKeyId = AppAttestHelper.shared.keyId
+                }
 
-            uploadAttestation(attestationBlock, encryptionKey: encryptionKey) { [weak self] result in
-                DispatchQueue.main.async {
-                    guard let self = self else { return }
-                    self.setAttestButtonLoading(false)
+                let (attestationBlock, encryptionKey) = try AttestationBuilder.createAttestation(
+                    cleartext: cleartext,
+                    keystrokeEvents: events,
+                    faceIdVerified: false,
+                    appAttestToken: appAttestToken
+                )
 
-                    switch result {
-                    case .success(let (url, shortId)):
-                        let before = self.textDocumentProxy.documentContextBeforeInput ?? ""
-                        if !before.isEmpty && !before.hasSuffix(" ") && !before.hasSuffix("\n") {
-                            self.textDocumentProxy.insertText(" ")
+                self.uploadAttestation(attestationBlock, encryptionKey: encryptionKey, appAttestKeyId: appAttestKeyId, appAttestAssertion: appAttestAssertion, appAttestClientData: appAttestClientData) { [weak self] result in
+                    DispatchQueue.main.async {
+                        guard let self = self else { return }
+                        self.setAttestButtonLoading(false)
+
+                        switch result {
+                        case .success(let (url, shortId)):
+                            let before = self.textDocumentProxy.documentContextBeforeInput ?? ""
+                            if !before.isEmpty && !before.hasSuffix(" ") && !before.hasSuffix("\n") {
+                                self.textDocumentProxy.insertText(" ")
+                            }
+                            let shortURL = url
+                                .replacingOccurrences(of: "https://www.", with: "")
+                                .replacingOccurrences(of: "https://", with: "")
+                            self.textDocumentProxy.insertText(shortURL)
+
+                            self.storePendingBiometric(shortId: shortId)
+                            self.fireBiometricNotification(shortId: shortId)
+
+                        case .failure:
+                            self.textDocumentProxy.insertText("\n\n" + attestationBlock)
                         }
-                        // Strip https://www. prefix for cleaner links
-                        let shortURL = url
-                            .replacingOccurrences(of: "https://www.", with: "")
-                            .replacingOccurrences(of: "https://", with: "")
-                        self.textDocumentProxy.insertText(shortURL)
-
-                        // Store shortId for Face ID verification and fire notification
-                        self.storePendingBiometric(shortId: shortId)
-                        self.fireBiometricNotification(shortId: shortId)
-
-                    case .failure:
-                        self.textDocumentProxy.insertText("\n\n" + attestationBlock)
+                        self.keystrokeEvents.removeAll()
                     }
-                    self.keystrokeEvents.removeAll()
+                }
+            } catch {
+                await MainActor.run {
+                    self.setAttestButtonLoading(false)
+                    self.textDocumentProxy.insertText("\n[Attestation error: \(error.localizedDescription)]")
                 }
             }
-        } catch {
-            setAttestButtonLoading(false)
-            textDocumentProxy.insertText("\n[Attestation error: \(error.localizedDescription)]")
         }
     }
 
@@ -403,7 +427,7 @@ class KeyWitnessKeyboard: UIInputViewController {
     private func fireBiometricNotification(shortId: String) {
         let content = UNMutableNotificationContent()
         content.title = "KeyWitness"
-        content.body = "Tap to verify with Face ID — 30 seconds to sign"
+        content.body = "Tap to confirm it was you. You have 30 seconds."
         content.sound = .default
         content.userInfo = ["shortId": shortId]
 
@@ -426,6 +450,9 @@ class KeyWitnessKeyboard: UIInputViewController {
     ///   - completion: Called with `.success((url, shortId))` or `.failure(error)`.
     private func uploadAttestation(_ attestationBlock: String,
                                    encryptionKey: String,
+                                   appAttestKeyId: String? = nil,
+                                   appAttestAssertion: String? = nil,
+                                   appAttestClientData: String? = nil,
                                    completion: @escaping (Result<(String, String), Error>) -> Void) {
         let endpoint = Self.serverBaseURL + "/api/attestations"
 
@@ -438,7 +465,16 @@ class KeyWitnessKeyboard: UIInputViewController {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        let body: [String: String] = ["attestation": attestationBlock]
+        var body: [String: String] = ["attestation": attestationBlock]
+        if let keyId = appAttestKeyId {
+            body["appAttestKeyId"] = keyId
+        }
+        if let assertion = appAttestAssertion {
+            body["appAttestAssertion"] = assertion
+        }
+        if let clientData = appAttestClientData {
+            body["appAttestClientData"] = clientData
+        }
         do {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         } catch {

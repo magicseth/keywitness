@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as appAttest from "../appAttest.js";
 import type * as attestations from "../attestations.js";
 import type * as http from "../http.js";
 import type * as keys from "../keys.js";
@@ -20,6 +21,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  appAttest: typeof appAttest;
   attestations: typeof attestations;
   http: typeof http;
   keys: typeof keys;
