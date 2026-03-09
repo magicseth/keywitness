@@ -29,7 +29,7 @@ export interface DataIntegrityProof {
   proofPurpose: "assertionMethod";
   proofValue: string; // multibase z + base58btc
   /** KeyWitness-specific: what kind of proof this is */
-  proofType?: "keystrokeAttestation" | "biometricVerification";
+  proofType?: "keystrokeAttestation" | "biometricVerification" | "voiceAttestation";
 }
 
 export interface AppleAppAttestProof {
@@ -46,15 +46,23 @@ export interface AppleAppAttestProof {
 export type VCProof = DataIntegrityProof | AppleAppAttestProof;
 
 export interface KeyWitnessCredentialSubject {
-  type: "HumanTypedContent";
+  type: "HumanTypedContent" | "HumanSpokenContent";
   cleartextHash: string;
   encryptedCleartext?: string;
   deviceId: string;
-  keystrokeBiometricsHash: string;
+  // Keystroke-specific
+  keystrokeBiometricsHash?: string;
+  keystrokeCount?: number;
+  // Voice-specific
+  audioHash?: string;
+  faceMeshBiometricsHash?: string;
+  audioMeshCorrelationScore?: number;
+  inputSource?: string;
+  audioDurationMs?: number;
+  // Common
   faceIdVerified?: boolean;
   /** App version that created this attestation */
   appVersion?: string;
-  keystrokeCount?: number;
   cleartextLength?: number;
 }
 
@@ -287,8 +295,8 @@ export async function verifyVC(credential: KeyWitnessVC): Promise<VCVerification
   }
 
   // The credential is valid if the primary keystroke attestation proof is valid
-  const keystrokeProof = results.find((r) => r.proofType === "keystrokeAttestation");
-  const overallValid = keystrokeProof?.valid ?? false;
+  const primaryProof = results.find((r) => r.proofType === "keystrokeAttestation" || r.proofType === "voiceAttestation");
+  const overallValid = primaryProof?.valid ?? false;
 
   // Extract raw public key from did:key for backward compat
   let publicKey: string | undefined;
@@ -326,7 +334,7 @@ export async function signEddsaJcs2022(
   credential: Omit<KeyWitnessVC, "proof">,
   secretKey: Uint8Array,
   options: {
-    proofType?: "keystrokeAttestation" | "biometricVerification";
+    proofType?: "keystrokeAttestation" | "biometricVerification" | "voiceAttestation";
     created?: string;
   } = {},
 ): Promise<DataIntegrityProof> {

@@ -64,6 +64,12 @@ export interface VerificationResult {
   proofs?: ProofVerificationResult[];
   // Trust status (fetched separately after verification)
   trustStatus?: TrustStatus;
+  // Voice attestation fields
+  attestationType?: "typed" | "spoken";
+  audioHash?: string;
+  audioMeshCorrelationScore?: number;
+  inputSource?: string;
+  audioDurationMs?: number;
 }
 
 // ── Base64url helpers ────────────────────────────────────────────────────────
@@ -261,6 +267,8 @@ async function verifyV3(
   let keystrokeTimings: KeystrokeTiming[] | undefined;
   let decryptionFailed = false;
 
+  const isVoice = vc.credentialSubject.type === "HumanSpokenContent";
+
   // Decrypt cleartext if encryption key is available
   if (encryptionKey && vc.credentialSubject.encryptedCleartext) {
     try {
@@ -270,7 +278,7 @@ async function verifyV3(
       const hash = await sha256Base64url(new TextEncoder().encode(decryptedCleartext));
       if (hash === vc.credentialSubject.cleartextHash) {
         cleartext = decryptedCleartext;
-        keystrokeTimings = inner.keystrokeTimings;
+        keystrokeTimings = inner.keystrokeTimings;  // undefined for voice
       } else {
         decryptionFailed = true;
       }
@@ -302,6 +310,11 @@ async function verifyV3(
     cleartextHash: vc.credentialSubject.cleartextHash,
     cleartextLength: vc.credentialSubject.cleartextLength,
     proofs: vcResult.proofs,
+    attestationType: isVoice ? "spoken" : "typed",
+    audioHash: vc.credentialSubject.audioHash,
+    audioMeshCorrelationScore: vc.credentialSubject.audioMeshCorrelationScore,
+    inputSource: vc.credentialSubject.inputSource,
+    audioDurationMs: vc.credentialSubject.audioDurationMs,
     error: vcResult.valid
       ? undefined
       : vcResult.error || "Signature verification failed.",

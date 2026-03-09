@@ -393,6 +393,14 @@ class MainViewController: UIViewController {
         }
     }
 
+    // MARK: - Voice Attestation
+
+    @objc private func voiceButtonTapped() {
+        let voiceVC = VoiceRecordingViewController()
+        voiceVC.modalPresentationStyle = .fullScreen
+        present(voiceVC, animated: true)
+    }
+
     // MARK: - Keyboard Handling
 
     @objc private func keyboardWillShow(_ notification: Notification) {
@@ -594,7 +602,18 @@ class MainViewController: UIViewController {
         testTextView.delegate = self
         testTextView.heightAnchor.constraint(greaterThanOrEqualToConstant: 150).isActive = true
 
-        let stack = UIStackView(arrangedSubviews: [testHeader, testTextView])
+        // Voice attestation button
+        let voiceButton = UIButton(type: .system)
+        voiceButton.setTitle("  Speak Instead", for: .normal)
+        voiceButton.setImage(UIImage(systemName: "waveform.circle.fill"), for: .normal)
+        voiceButton.tintColor = accentColor
+        voiceButton.titleLabel?.font = .systemFont(ofSize: 15, weight: .semibold)
+        voiceButton.backgroundColor = accentColor.withAlphaComponent(0.15)
+        voiceButton.layer.cornerRadius = 10
+        voiceButton.contentEdgeInsets = UIEdgeInsets(top: 12, left: 16, bottom: 12, right: 16)
+        voiceButton.addTarget(self, action: #selector(voiceButtonTapped), for: .touchUpInside)
+
+        let stack = UIStackView(arrangedSubviews: [testHeader, testTextView, voiceButton])
         stack.axis = .vertical
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false

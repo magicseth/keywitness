@@ -169,6 +169,7 @@ function formatTimestampShort(iso: string): string {
 function proofTypeLabel(proofType: string): string {
   switch (proofType) {
     case "keystrokeAttestation": return "Keystroke Attestation";
+    case "voiceAttestation": return "Voice Attestation";
     case "biometricVerification": return "Face ID Verification";
     case "deviceAttestation": return "Device Attestation";
     case "fingerprintVerification": return "Fingerprint Verification";
@@ -292,6 +293,7 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
   const hasDeviceVerification = !!attestationDoc?.deviceVerified;
   const hasFaceId = !!attestationDoc?.biometricSignature;
   const hasKeystrokeData = !!(result?.keystrokeTimings && result.keystrokeTimings.length > 0);
+  const isVoice = result?.attestationType === "spoken";
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-gray-100">
@@ -434,8 +436,8 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
                       </svg>
                       Verified
                     </span>
-                    <span className={hasKeystrokeData ? "text-green-500/50" : ""}>
-                      {hasKeystrokeData ? "\u2713" : "\u2013"} Keystrokes
+                    <span className={(hasKeystrokeData || isVoice) ? "text-green-500/50" : ""}>
+                      {(hasKeystrokeData || isVoice) ? "\u2713" : "\u2013"} {isVoice ? "Voice" : "Keystrokes"}
                     </span>
                     <span className={hasDeviceVerification ? "text-green-500/50" : ""}>
                       {hasDeviceVerification ? "\u2713" : "\u2013"} Device
@@ -452,7 +454,15 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
                 {/* What this means — plain English */}
                 <div className="rounded-xl bg-[#111111] border border-gray-800/60 p-6 space-y-3 text-sm text-gray-400">
                   <div className="text-white font-semibold text-base mb-2">What this means</div>
-                  {hasKeystrokeData && (
+                  {isVoice && (
+                    <p>
+                      <span className="text-green-400 font-medium">Voice verified</span> — this text was spoken aloud into the phone's microphone.
+                      {result?.audioMeshCorrelationScore !== undefined && (
+                        <> The speaker's face movements correlated {Math.round(result.audioMeshCorrelationScore * 100)}% with the audio, confirming a real person spoke these words.</>
+                      )}
+                    </p>
+                  )}
+                  {hasKeystrokeData && !isVoice && (
                     <p>
                       <span className="text-green-400 font-medium">Keystrokes verified</span> — this text was typed by hand on a keyboard, not pasted or generated. The typing rhythm and finger positions are recorded in the seal.
                     </p>
@@ -468,7 +478,7 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
                       {attestationDoc?.biometricTimestamp ? ` ${Math.round((attestationDoc.biometricTimestamp - attestationDoc.createdAt) / 1000)} seconds after typing` : ""}.
                     </p>
                   )}
-                  {!hasKeystrokeData && !hasDeviceVerification && !hasFaceId && (
+                  {!hasKeystrokeData && !isVoice && !hasDeviceVerification && !hasFaceId && (
                     <p>The cryptographic signature is valid — the text hasn't been modified since it was signed.</p>
                   )}
                 </div>

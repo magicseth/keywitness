@@ -35,6 +35,12 @@
 		B1B2C3D4E5F60015000B0001 /* KeyWitnessWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B1B2C3D4E5F60005000B0001 /* KeyWitnessWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		C1B2C3D4E5F60003000C0001 /* KeyboardKit in Frameworks */ = {isa = PBXBuildFile; productRef = C1B2C3D4E5F60002000C0001 /* KeyboardKit */; };
 		D1B2C3D4E5F60001000D0001 /* EmojiKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1B2C3D4E5F60002000D0001 /* EmojiKey.swift */; };
+		E1B2C3D4E5F60011000E0001 /* VoiceTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1B2C3D4E5F60001000E0001 /* VoiceTypes.swift */; };
+		E1B2C3D4E5F60012000E0001 /* AudioMeshCorrelator.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1B2C3D4E5F60002000E0001 /* AudioMeshCorrelator.swift */; };
+		E1B2C3D4E5F60013000E0001 /* VoiceVCBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1B2C3D4E5F60003000E0001 /* VoiceVCBuilder.swift */; };
+		E1B2C3D4E5F60014000E0001 /* VoiceRecordingSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1B2C3D4E5F60004000E0001 /* VoiceRecordingSession.swift */; };
+		E1B2C3D4E5F60015000E0001 /* VoiceRecordingViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1B2C3D4E5F60005000E0001 /* VoiceRecordingViewController.swift */; };
+		E1B2C3D4E5F60016000E0001 /* EmojiKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1B2C3D4E5F60002000D0001 /* EmojiKey.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -95,6 +101,11 @@
 		B1B2C3D4E5F60003000B0001 /* KeyWitnessWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyWitnessWidgetBundle.swift; sourceTree = "<group>"; };
 		B1B2C3D4E5F60004000B0001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B1B2C3D4E5F60005000B0001 /* KeyWitnessWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = KeyWitnessWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		E1B2C3D4E5F60001000E0001 /* VoiceTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTypes.swift; sourceTree = "<group>"; };
+		E1B2C3D4E5F60002000E0001 /* AudioMeshCorrelator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioMeshCorrelator.swift; sourceTree = "<group>"; };
+		E1B2C3D4E5F60003000E0001 /* VoiceVCBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceVCBuilder.swift; sourceTree = "<group>"; };
+		E1B2C3D4E5F60004000E0001 /* VoiceRecordingSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceRecordingSession.swift; sourceTree = "<group>"; };
+		E1B2C3D4E5F60005000E0001 /* VoiceRecordingViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceRecordingViewController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -143,6 +154,7 @@
 				A1B2C3D4E5F60002000A0001 /* AppDelegate.swift */,
 				A1B2C3D4E5F60004000A0001 /* MainViewController.swift */,
 				A1B2C3D4E5F60093000A0001 /* AppAttestManager.swift */,
+				E1B2C3D4E5F60020000E0001 /* Voice */,
 				A1B2C3D4E5F60097000A0001 /* LaunchScreen.storyboard */,
 				A1B2C3D4E5F60091000A0001 /* Assets.xcassets */,
 				A1B2C3D4E5F60016000A0001 /* Info.plist */,
@@ -192,6 +204,18 @@
 				B1B2C3D4E5F60001000B0001 /* KeyWitnessActivity.swift */,
 			);
 			path = Shared;
+			sourceTree = "<group>";
+		};
+		E1B2C3D4E5F60020000E0001 /* Voice */ = {
+			isa = PBXGroup;
+			children = (
+				E1B2C3D4E5F60001000E0001 /* VoiceTypes.swift */,
+				E1B2C3D4E5F60002000E0001 /* AudioMeshCorrelator.swift */,
+				E1B2C3D4E5F60003000E0001 /* VoiceVCBuilder.swift */,
+				E1B2C3D4E5F60004000E0001 /* VoiceRecordingSession.swift */,
+				E1B2C3D4E5F60005000E0001 /* VoiceRecordingViewController.swift */,
+			);
+			path = Voice;
 			sourceTree = "<group>";
 		};
 		B1B2C3D4E5F60021000B0001 /* KeyWitnessWidgets */ = {
@@ -347,6 +371,12 @@
 				A1B2C3D4E5F600A6000A0001 /* DIDKey.swift in Sources */,
 				A1B2C3D4E5F600A7000A0001 /* JCS.swift in Sources */,
 				A1B2C3D4E5F600A8000A0001 /* VCBuilder.swift in Sources */,
+				E1B2C3D4E5F60016000E0001 /* EmojiKey.swift in Sources */,
+				E1B2C3D4E5F60011000E0001 /* VoiceTypes.swift in Sources */,
+				E1B2C3D4E5F60012000E0001 /* AudioMeshCorrelator.swift in Sources */,
+				E1B2C3D4E5F60013000E0001 /* VoiceVCBuilder.swift in Sources */,
+				E1B2C3D4E5F60014000E0001 /* VoiceRecordingSession.swift in Sources */,
+				E1B2C3D4E5F60015000E0001 /* VoiceRecordingViewController.swift in Sources */,
 				B1B2C3D4E5F60010000B0001 /* KeyWitnessActivity.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -526,7 +556,10 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = KeyWitness/Info.plist;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_NSCameraUsageDescription = "KeyWitness uses the front camera for TrueDepth face tracking during voice attestations.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "KeyWitness uses Face ID to verify your identity for cryptographic attestations.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "KeyWitness records audio during voice attestations to prove spoken content.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "KeyWitness uses on-device speech recognition to transcribe voice attestations.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_NSSupportsLiveActivitiesFrequentUpdates = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -558,7 +591,10 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = KeyWitness/Info.plist;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_NSCameraUsageDescription = "KeyWitness uses the front camera for TrueDepth face tracking during voice attestations.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "KeyWitness uses Face ID to verify your identity for cryptographic attestations.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "KeyWitness records audio during voice attestations to prove spoken content.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "KeyWitness uses on-device speech recognition to transcribe voice attestations.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_NSSupportsLiveActivitiesFrequentUpdates = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
