@@ -1114,6 +1114,7 @@ function buildBadgeHTML(shortId: string, style: string, theme: string, origin: s
   function proofLabel(t) {
     switch(t) {
       case "keystrokeAttestation": return "Keystroke";
+      case "voiceAttestation": return "Voice";
       case "biometricVerification": return "Face ID";
       case "deviceAttestation": return "Device";
       default: return t;

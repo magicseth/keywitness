@@ -15,6 +15,7 @@ class VoiceRecordingViewController: UIViewController, ARSCNViewDelegate {
     private var transcriptionLabel: UILabel!
     private var statusLabel: UILabel!
     private var recordButton: UIButton!
+    private var cancelButton: UIButton!
     private var correlationLabel: UILabel!
     private var isRecording = false
     private var lastResult: VoiceRecordingSession.Result?
@@ -103,7 +104,18 @@ class VoiceRecordingViewController: UIViewController, ARSCNViewDelegate {
         correlationLabel.isHidden = true
         view.addSubview(correlationLabel)
 
-        // Record button
+        // Button stack (cancel + record/seal)
+        cancelButton = UIButton(type: .system)
+        cancelButton.translatesAutoresizingMaskIntoConstraints = false
+        cancelButton.setTitle("Cancel", for: .normal)
+        cancelButton.setTitleColor(.white, for: .normal)
+        cancelButton.titleLabel?.font = .systemFont(ofSize: 18, weight: .semibold)
+        cancelButton.backgroundColor = UIColor.white.withAlphaComponent(0.15)
+        cancelButton.layer.cornerRadius = 12
+        cancelButton.isHidden = true
+        cancelButton.addTarget(self, action: #selector(cancelTapped), for: .touchUpInside)
+        view.addSubview(cancelButton)
+
         recordButton = UIButton(type: .system)
         recordButton.translatesAutoresizingMaskIntoConstraints = false
         updateRecordButton()
@@ -133,33 +145,49 @@ class VoiceRecordingViewController: UIViewController, ARSCNViewDelegate {
             correlationLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
             correlationLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
 
+            cancelButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -30),
+            cancelButton.trailingAnchor.constraint(equalTo: view.centerXAnchor, constant: -8),
+            cancelButton.widthAnchor.constraint(equalToConstant: 140),
+            cancelButton.heightAnchor.constraint(equalToConstant: 50),
+
             recordButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -30),
-            recordButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            recordButton.widthAnchor.constraint(equalToConstant: 200),
+            recordButton.leadingAnchor.constraint(equalTo: view.centerXAnchor, constant: 8),
+            recordButton.widthAnchor.constraint(equalToConstant: 140),
             recordButton.heightAnchor.constraint(equalToConstant: 50),
         ])
     }
 
     private func updateRecordButton() {
         if lastResult != nil && !isRecording {
-            // Show "Seal" button after recording
-            recordButton.setTitle("Seal", for: .normal)
-            recordButton.setTitleColor(.white, for: .normal)
-            recordButton.titleLabel?.font = .systemFont(ofSize: 18, weight: .semibold)
+            // Show "Seal" button with checkmark badge + cancel button
+            let attachment = NSTextAttachment()
+            attachment.image = UIImage(systemName: "checkmark.seal.fill")?.withTintColor(.white, renderingMode: .alwaysOriginal)
+            let imageString = NSAttributedString(attachment: attachment)
+            let title = NSMutableAttributedString(attributedString: imageString)
+            title.append(NSAttributedString(string: " Seal", attributes: [
+                .foregroundColor: UIColor.white,
+                .font: UIFont.systemFont(ofSize: 18, weight: .semibold),
+            ]))
+            recordButton.setAttributedTitle(title, for: .normal)
             recordButton.backgroundColor = UIColor(red: 0.20, green: 0.55, blue: 1.0, alpha: 1)
             recordButton.layer.cornerRadius = 12
+            cancelButton.isHidden = false
         } else if isRecording {
+            recordButton.setAttributedTitle(nil, for: .normal)
             recordButton.setTitle("Stop", for: .normal)
             recordButton.setTitleColor(.white, for: .normal)
             recordButton.titleLabel?.font = .systemFont(ofSize: 18, weight: .semibold)
             recordButton.backgroundColor = .systemRed
             recordButton.layer.cornerRadius = 12
+            cancelButton.isHidden = true
         } else {
+            recordButton.setAttributedTitle(nil, for: .normal)
             recordButton.setTitle("Record", for: .normal)
             recordButton.setTitleColor(.white, for: .normal)
             recordButton.titleLabel?.font = .systemFont(ofSize: 18, weight: .semibold)
             recordButton.backgroundColor = .systemRed
             recordButton.layer.cornerRadius = 12
+            cancelButton.isHidden = true
         }
     }
 
@@ -167,6 +195,15 @@ class VoiceRecordingViewController: UIViewController, ARSCNViewDelegate {
 
     @objc private func closeTapped() {
         dismiss(animated: true)
+    }
+
+    @objc private func cancelTapped() {
+        lastResult = nil
+        transcriptionLabel.text = "Tap record and speak"
+        correlationLabel.isHidden = true
+        statusLabel.text = "Ready"
+        statusLabel.textColor = .systemGray
+        updateRecordButton()
     }
 
     @objc private func recordTapped() {
@@ -267,9 +304,9 @@ class VoiceRecordingViewController: UIViewController, ARSCNViewDelegate {
                     statusLabel.textColor = .systemGreen
                     transcriptionLabel.text = fullURL
 
-                    // Copy to clipboard
-                    UIPasteboard.general.string = fullURL
-                    correlationLabel.text = "Link copied to clipboard"
+                    // Copy text + URL to clipboard
+                    UIPasteboard.general.string = "\(result.transcription)\n\n\(fullURL)"
+                    correlationLabel.text = "Text + link copied to clipboard"
                     correlationLabel.isHidden = false
                     recordButton.isEnabled = true
                     lastResult = nil
@@ -306,8 +343,12 @@ class VoiceRecordingViewController: UIViewController, ARSCNViewDelegate {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse,
-              (200...299).contains(httpResponse.statusCode) else {
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+        guard (200...299).contains(httpResponse.statusCode) else {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            NSLog("[VoiceAttest] Upload failed: HTTP %d — %@", httpResponse.statusCode, body)
             throw URLError(.badServerResponse)
         }
 

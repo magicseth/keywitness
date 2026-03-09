@@ -203,10 +203,11 @@ final class VoiceRecordingSession: NSObject, ARSessionDelegate {
         NSLog("[VoiceAttest] Recording stopped: %d mesh frames, correlation=%.3f, duration=%.1fs",
               meshFrames.count, correlation.score, duration)
 
-        // Reset
+        // Reset all state for next recording
         audioSamples.removeAll()
         meshFrames.removeAll()
         currentTranscription = ""
+        lastMeshSampleTime = 0
 
         return result
     }
