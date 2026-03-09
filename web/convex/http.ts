@@ -17,6 +17,7 @@ http.route({
 
     // If App Attest assertion is provided, verify it before storing
     let deviceVerified = false;
+    console.log("POST /api/attestations — appAttestKeyId:", body.appAttestKeyId ?? "MISSING", "hasAssertion:", !!body.appAttestAssertion, "hasClientData:", !!body.appAttestClientData, "debug:", body.appAttestDebug ?? "none");
     if (body.appAttestKeyId && body.appAttestAssertion && body.appAttestClientData) {
       try {
         await ctx.runMutation(internal.appAttest.verifyAssertion, {
@@ -25,8 +26,10 @@ http.route({
           expectedClientData: body.appAttestClientData,
         });
         deviceVerified = true;
-      } catch {
+        console.log("App Attest assertion verified successfully for keyId:", body.appAttestKeyId);
+      } catch (e) {
         // Assertion failed — store attestation but mark as unverified
+        console.error("App Attest assertion verification failed:", e instanceof Error ? e.message : e);
       }
     }
 
@@ -129,7 +132,31 @@ http.route({
         signature: body.signature,
         publicKey: body.publicKey,
       });
-      return new Response(JSON.stringify(result), {
+
+      // If App Attest assertion is included (from main app), verify it and mark device as verified
+      let deviceVerified = false;
+      let appAttestError: string | null = null;
+      console.log("Biometric verify — appAttestKeyId:", body.appAttestKeyId ?? "MISSING", "hasAssertion:", !!body.appAttestAssertion, "hasClientData:", !!body.appAttestClientData);
+      if (body.appAttestKeyId && body.appAttestAssertion && body.appAttestClientData) {
+        try {
+          await ctx.runMutation(internal.appAttest.verifyAssertion, {
+            keyId: body.appAttestKeyId,
+            assertion: body.appAttestAssertion,
+            expectedClientData: body.appAttestClientData,
+          });
+          deviceVerified = true;
+          // Mark the attestation as device-verified
+          await ctx.runMutation(api.attestations.markDeviceVerified, {
+            shortId: body.shortId,
+          });
+          console.log("Device verified via biometric endpoint for shortId:", body.shortId);
+        } catch (e) {
+          appAttestError = e instanceof Error ? e.message : String(e);
+          console.error("App Attest in biometric verify failed:", appAttestError);
+        }
+      }
+
+      return new Response(JSON.stringify({ ...result, deviceVerified, appAttestError }), {
         status: 200,
         headers: {
           "Content-Type": "application/json",
@@ -238,6 +265,23 @@ http.route({
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "POST, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type",
+      },
+    });
+  }),
+});
+
+// ── Debug: App Attest credentials ────────────────────────────────────────────
+
+http.route({
+  path: "/api/app-attest/debug",
+  method: "GET",
+  handler: httpAction(async (ctx) => {
+    const creds = await ctx.runQuery(api.appAttest.listCredentials, {});
+    return new Response(JSON.stringify({ credentials: creds }, null, 2), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
       },
     });
   }),

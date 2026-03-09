@@ -65,24 +65,23 @@ class MainViewController: UIViewController {
     // MARK: - App Attest Setup
 
     private func setupAppAttest() {
-        guard AppAttestManager.shared.isSupported else {
-            updateBiometricStatus("Device verification not available on this device", color: .lightGray)
-            clearBiometricStatusAfterDelay()
+        let mgr = AppAttestManager.shared
+        guard mgr.isSupported else {
+            updateBiometricStatus("App Attest: NOT SUPPORTED on this device", color: .systemRed)
             return
         }
-        guard !AppAttestManager.shared.isAttested else { return }
-
+        updateBiometricStatus("App Attest: checking key…", color: .systemYellow)
         Task {
             do {
-                try await AppAttestManager.shared.setupIfNeeded()
+                try await mgr.setupIfNeeded()
                 await MainActor.run {
-                    updateBiometricStatus("Device verified successfully", color: .systemGreen)
+                    updateBiometricStatus("App Attest: OK (key: \(mgr.keyId?.prefix(8) ?? "?")…)", color: .systemGreen)
                     clearBiometricStatusAfterDelay()
                 }
             } catch {
                 await MainActor.run {
-                    updateBiometricStatus("Device verification failed. Please try again later.", color: .systemRed)
-                    clearBiometricStatusAfterDelay()
+                    updateBiometricStatus("App Attest FAILED: \(error.localizedDescription)", color: .systemRed)
+                    // Don't auto-clear — let the user see the error
                 }
             }
         }
@@ -115,8 +114,70 @@ class MainViewController: UIViewController {
         defaults?.removeObject(forKey: "pendingBiometricCreatedAt")
         defaults?.removeObject(forKey: "pendingBiometricCleartext")
 
+        // Start Live Activity from the main app (extensions can't start them)
+        startLiveActivity(shortId: shortId, cleartext: cleartext)
+
         // Show confirmation before Face ID
         showBiometricConfirmation(shortId: shortId, cleartext: cleartext)
+    }
+
+    /// Start a Live Activity with countdown timer on Dynamic Island / Lock Screen.
+    /// Uses the stored expiration time from the keyboard so the countdown is accurate.
+    private func startLiveActivity(shortId: String, cleartext: String?) {
+        guard #available(iOS 16.2, *) else {
+            print("[KeyWitness] Live Activities require iOS 16.2+")
+            return
+        }
+
+        let authInfo = ActivityAuthorizationInfo()
+        print("[KeyWitness] Live Activities enabled: \(authInfo.areActivitiesEnabled), frequentPushesEnabled: \(authInfo.frequentPushesEnabled)")
+        guard authInfo.areActivitiesEnabled else {
+            print("[KeyWitness] Live Activities not enabled in Settings")
+            return
+        }
+
+        // Skip if we already have one running for this shortId
+        let existing = Activity<KeyWitnessVerificationAttributes>.activities
+        print("[KeyWitness] Current live activities: \(existing.count)")
+        if existing.contains(where: { $0.attributes.shortId == shortId }) {
+            print("[KeyWitness] Live Activity already exists for \(shortId)")
+            return
+        }
+
+        // Use the stored expiration from the keyboard, or fall back to 30s from now
+        let defaults = UserDefaults(suiteName: "group.io.keywitness")
+        let storedExpiry = defaults?.object(forKey: "pendingBiometricExpiresAt") as? Date
+        let expiresAt = storedExpiry ?? Date().addingTimeInterval(30)
+        defaults?.removeObject(forKey: "pendingBiometricExpiresAt")
+        print("[KeyWitness] Stored expiry: \(String(describing: storedExpiry)), using: \(expiresAt), now: \(Date())")
+
+        let messagePreview: String
+        if let text = cleartext, !text.isEmpty {
+            if text.count > 100 {
+                messagePreview = String(text.prefix(100)) + "..."
+            } else {
+                messagePreview = text
+            }
+        } else {
+            messagePreview = "Pending verification"
+        }
+
+        let attributes = KeyWitnessVerificationAttributes(
+            shortId: shortId,
+            messagePreview: messagePreview,
+            expiresAt: expiresAt
+        )
+        let state = KeyWitnessVerificationAttributes.ContentState(status: "waiting")
+        do {
+            let activity = try Activity.request(
+                attributes: attributes,
+                content: .init(state: state, staleDate: expiresAt),
+                pushType: nil
+            )
+            print("[KeyWitness] Live Activity started: id=\(activity.id), shortId=\(shortId), expires=\(expiresAt)")
+        } catch {
+            print("[KeyWitness] Failed to start Live Activity: \(error)")
+        }
     }
 
     // MARK: - Biometric Confirmation + Verification Flow
@@ -178,47 +239,90 @@ class MainViewController: UIViewController {
     private func uploadBiometricSignature(shortId: String) {
         updateBiometricStatus("Signing...", color: .systemYellow)
 
-        do {
-            let challenge = "keywitness:biometric:\(shortId)"
-            guard let data = challenge.data(using: .utf8) else {
-                throw CryptoEngineError.encryptionFailed
-            }
-            let signature = try CryptoEngine.signBase64URL(data)
-            let publicKey = try CryptoEngine.publicKeyBase64URL()
+        Task {
+            do {
+                let challenge = "keywitness:biometric:\(shortId)"
+                guard let data = challenge.data(using: .utf8) else {
+                    throw CryptoEngineError.encryptionFailed
+                }
+                let signature = try CryptoEngine.signBase64URL(data)
+                let publicKey = try CryptoEngine.publicKeyBase64URL()
 
-            let url = URL(string: "https://www.keywitness.io/api/attestations/verify-biometric")!
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                // Also generate App Attest assertion from the main app
+                // (keyboard extensions can't use App Attest, so the main app provides it)
+                var appAttestKeyId: String? = nil
+                var appAttestAssertion: String? = nil
+                var appAttestClientData: String? = nil
+                NSLog("[MainVC] App Attest isSupported=%d isAttested=%d keyId=%@",
+                      AppAttestManager.shared.isSupported ? 1 : 0,
+                      AppAttestManager.shared.isAttested ? 1 : 0,
+                      AppAttestManager.shared.keyId ?? "nil")
+                if AppAttestManager.shared.isSupported {
+                    do {
+                        let clientDataString = "keywitness:device-verify:\(shortId)"
+                        let clientDataBytes = clientDataString.data(using: .utf8)!
+                        self.updateBiometricStatus("Generating device attestation...", color: .systemYellow)
+                        let assertion = try await AppAttestManager.shared.generateAssertion(for: clientDataBytes)
+                        appAttestKeyId = AppAttestManager.shared.keyId
+                        appAttestAssertion = CryptoEngine.base64URLEncode(assertion)
+                        appAttestClientData = clientDataString
+                        NSLog("[MainVC] App Attest assertion generated, keyId=%@", appAttestKeyId ?? "nil")
+                    } catch {
+                        NSLog("[MainVC] App Attest assertion failed: %@", error.localizedDescription)
+                        self.updateBiometricStatus("Device attest failed: \(error.localizedDescription)", color: .systemOrange)
+                    }
+                } else {
+                    NSLog("[MainVC] App Attest NOT SUPPORTED")
+                }
 
-            let payload: [String: String] = [
-                "shortId": shortId,
-                "signature": signature,
-                "publicKey": publicKey,
-            ]
-            request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+                let url = URL(string: "https://www.keywitness.io/api/attestations/verify-biometric")!
+                var request = URLRequest(url: url)
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-            URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
-                DispatchQueue.main.async {
+                var payload: [String: String] = [
+                    "shortId": shortId,
+                    "signature": signature,
+                    "publicKey": publicKey,
+                ]
+                if let keyId = appAttestKeyId { payload["appAttestKeyId"] = keyId }
+                if let assertion = appAttestAssertion { payload["appAttestAssertion"] = assertion }
+                if let clientData = appAttestClientData { payload["appAttestClientData"] = clientData }
+
+                request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+
+                let (respData, response) = try await URLSession.shared.data(for: request)
+                let respJson = try? JSONSerialization.jsonObject(with: respData) as? [String: Any]
+                let deviceVerified = respJson?["deviceVerified"] as? Bool ?? false
+                let appAttestErr = respJson?["appAttestError"] as? String
+                await MainActor.run {
                     if let httpResponse = response as? HTTPURLResponse,
-                       httpResponse.statusCode == 200, error == nil {
-                        self?.updateBiometricStatus("✓ Confirmed! Your proof is sealed.", color: .systemGreen)
-                        self?.endLiveActivity(shortId: shortId, status: "verified")
+                       httpResponse.statusCode == 200 {
+                        var msg = "✓ Confirmed!"
+                        if deviceVerified {
+                            msg += " Device verified ✓"
+                        } else if let err = appAttestErr {
+                            msg += " (device: \(err))"
+                        } else if appAttestKeyId == nil {
+                            msg += " (no App Attest key)"
+                        }
+                        self.updateBiometricStatus(msg, color: deviceVerified ? .systemGreen : .systemYellow)
+                        self.endLiveActivity(shortId: shortId, status: "verified")
                     } else {
                         var msg = "Upload failed"
-                        if let data = data,
-                           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                           let errorMsg = json["error"] as? String {
+                        if let errorMsg = respJson?["error"] as? String {
                             msg = errorMsg
                         }
-                        self?.updateBiometricStatus(msg, color: .systemRed)
+                        self.updateBiometricStatus(msg, color: .systemRed)
                     }
-                    self?.clearBiometricStatusAfterDelay()
+                    self.clearBiometricStatusAfterDelay()
                 }
-            }.resume()
-        } catch {
-            updateBiometricStatus("Signing error: \(error.localizedDescription)", color: .systemRed)
-            clearBiometricStatusAfterDelay()
+            } catch {
+                await MainActor.run {
+                    self.updateBiometricStatus("Signing error: \(error.localizedDescription)", color: .systemRed)
+                    self.clearBiometricStatusAfterDelay()
+                }
+            }
         }
     }
 
@@ -589,12 +693,18 @@ extension MainViewController: UNUserNotificationCenterDelegate {
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
         let userInfo = response.notification.request.content.userInfo
         if let shortId = userInfo["shortId"] as? String {
-            let defaults = UserDefaults(suiteName: "group.io.keywitness")
-            let cleartext = defaults?.string(forKey: "pendingBiometricCleartext")
+            // Get cleartext from notification userInfo (preferred) or shared defaults (fallback)
+            let cleartext = (userInfo["cleartext"] as? String)
+                ?? UserDefaults(suiteName: "group.io.keywitness")?.string(forKey: "pendingBiometricCleartext")
+
             // Clean up so checkPendingBiometric doesn't also fire
+            let defaults = UserDefaults(suiteName: "group.io.keywitness")
             defaults?.removeObject(forKey: "pendingBiometricShortId")
             defaults?.removeObject(forKey: "pendingBiometricCreatedAt")
             defaults?.removeObject(forKey: "pendingBiometricCleartext")
+
+            // Start Live Activity from the main app
+            startLiveActivity(shortId: shortId, cleartext: cleartext)
             showBiometricConfirmation(shortId: shortId, cleartext: cleartext)
         }
         completionHandler()

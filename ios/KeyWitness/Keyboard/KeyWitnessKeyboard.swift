@@ -1,6 +1,5 @@
 import UIKit
 import UserNotifications
-import ActivityKit
 
 /// KeyWitnessKeyboard is the main UIInputViewController for the KeyWitness
 /// custom keyboard extension. It renders a QWERTY layout with touch biometric
@@ -46,6 +45,7 @@ class KeyWitnessKeyboard: UIInputViewController {
     // MARK: - UI References
 
     private var rowStackView: UIStackView!
+    private var debugLabel: UILabel!
 
     // MARK: - Lifecycle
 
@@ -75,6 +75,16 @@ class KeyWitnessKeyboard: UIInputViewController {
             container.trailingAnchor.constraint(equalTo: inputView.trailingAnchor, constant: -3),
             container.bottomAnchor.constraint(equalTo: inputView.bottomAnchor, constant: -4)
         ])
+
+        // Debug label — shows device verify status
+        let dbg = UILabel()
+        dbg.font = UIFont.systemFont(ofSize: 9, weight: .medium)
+        dbg.textColor = UIColor.systemCyan
+        dbg.textAlignment = .center
+        dbg.numberOfLines = 2
+        dbg.text = "Device verify: via main app (Face ID step)"
+        container.addArrangedSubview(dbg)
+        self.debugLabel = dbg
 
         // Row 1: Q W E R T Y U I O P
         container.addArrangedSubview(makeLetterRow(letterRows[0]))
@@ -355,25 +365,17 @@ class KeyWitnessKeyboard: UIInputViewController {
         let events = keystrokeEvents
         Task {
             do {
-                // Generate App Attest assertion if available
-                var appAttestToken: String? = nil
-                var appAttestKeyId: String? = nil
-                var appAttestAssertion: String? = nil
-                var appAttestClientData: String? = nil
-                if AppAttestHelper.shared.isAvailable {
-                    let deviceId = AttestationBuilder.deviceIdentifier()
-                    let timestamp = AttestationBuilder.iso8601Timestamp()
-                    let cleartextHash = CryptoEngine.sha256Base64URL(Data(cleartext.utf8))
-                    let clientDataString = "\(cleartextHash):\(deviceId):\(timestamp)"
-                    let clientData = clientDataString.data(using: .utf8)!
-                    let assertion = try await AppAttestHelper.shared.generateAssertion(for: clientData)
-                    let assertionB64 = CryptoEngine.base64URLEncode(assertion)
-                    appAttestToken = assertionB64
-                    appAttestAssertion = assertionB64
-                    appAttestClientData = clientDataString
-                    appAttestKeyId = AppAttestHelper.shared.keyId
+                // App Attest is NOT available in keyboard extensions (Apple restriction).
+                // Device verification happens in the main app during biometric confirmation.
+                let appAttestKeyId: String? = nil
+                let appAttestAssertion: String? = nil
+                let appAttestClientData: String? = nil
+                await MainActor.run {
+                    self.debugLabel?.text = "Device verify: via main app (Face ID step)"
+                    self.debugLabel?.textColor = UIColor.systemCyan
                 }
 
+                NSLog("[KeyWitness] Building v3 attestation — appAttestKeyId: %@, hasAssertion: %d, hasClientData: %d", appAttestKeyId ?? "nil", appAttestAssertion != nil ? 1 : 0, appAttestClientData != nil ? 1 : 0)
                 let (attestationBlock, encryptionKey) = try AttestationBuilder.createV3Attestation(
                     cleartext: cleartext,
                     keystrokeEvents: events,
@@ -382,8 +384,9 @@ class KeyWitnessKeyboard: UIInputViewController {
                     appAttestAssertion: appAttestAssertion,
                     appAttestClientData: appAttestClientData
                 )
+                NSLog("[KeyWitness] v3 attestation built successfully")
 
-                self.uploadAttestation(attestationBlock, encryptionKey: encryptionKey, appAttestKeyId: appAttestKeyId, appAttestAssertion: appAttestAssertion, appAttestClientData: appAttestClientData) { [weak self] result in
+                self.uploadAttestation(attestationBlock, encryptionKey: encryptionKey) { [weak self] result in
                     DispatchQueue.main.async {
                         guard let self = self else { return }
                         self.setAttestButtonLoading(false)
@@ -427,7 +430,8 @@ class KeyWitnessKeyboard: UIInputViewController {
         defaults?.set(cleartext, forKey: "pendingBiometricCleartext")
     }
 
-    /// Start a Live Activity (or fall back to a regular notification) for biometric confirmation.
+    /// Fire a notification for biometric confirmation.
+    /// Live Activity is started from the main app when it opens.
     private func fireBiometricNotification(shortId: String, cleartext: String) {
         let messagePreview: String
         if cleartext.count > 100 {
@@ -436,33 +440,15 @@ class KeyWitnessKeyboard: UIInputViewController {
             messagePreview = cleartext
         }
 
-        // Try to start a Live Activity
-        if #available(iOSApplicationExtension 16.2, *),
-           ActivityAuthorizationInfo().areActivitiesEnabled {
-            let attributes = KeyWitnessVerificationAttributes(
-                shortId: shortId,
-                messagePreview: messagePreview,
-                expiresAt: Date().addingTimeInterval(30)
-            )
-            let state = KeyWitnessVerificationAttributes.ContentState(status: "waiting")
-            do {
-                _ = try Activity.request(
-                    attributes: attributes,
-                    content: .init(state: state, staleDate: Date().addingTimeInterval(30)),
-                    pushType: nil
-                )
-                // Also fire a regular notification as a fallback tap target
-            } catch {
-                // Fall through to regular notification
-            }
-        }
+        // Store expiration so the main app can show an accurate countdown
+        let defaults = UserDefaults(suiteName: "group.io.keywitness")
+        defaults?.set(Date().addingTimeInterval(30), forKey: "pendingBiometricExpiresAt")
 
-        // Always fire a regular notification too (appears immediately, supports tap-to-open)
         let content = UNMutableNotificationContent()
         content.title = "Confirm it's you"
-        content.body = "You wrote: \"\(messagePreview)\"\n\nTap to verify with Face ID."
+        content.body = "You wrote: \"\(messagePreview)\"\n\nTap to verify with Face ID — 30 seconds."
         content.sound = .default
-        content.userInfo = ["shortId": shortId]
+        content.userInfo = ["shortId": shortId, "cleartext": cleartext]
         if #available(iOSApplicationExtension 15.0, *) {
             content.interruptionLevel = .timeSensitive
         }
@@ -485,9 +471,6 @@ class KeyWitnessKeyboard: UIInputViewController {
     ///   - completion: Called with `.success((url, shortId))` or `.failure(error)`.
     private func uploadAttestation(_ attestationBlock: String,
                                    encryptionKey: String,
-                                   appAttestKeyId: String? = nil,
-                                   appAttestAssertion: String? = nil,
-                                   appAttestClientData: String? = nil,
                                    completion: @escaping (Result<(String, String), Error>) -> Void) {
         let endpoint = Self.serverBaseURL + "/api/attestations"
 
@@ -500,16 +483,7 @@ class KeyWitnessKeyboard: UIInputViewController {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        var body: [String: String] = ["attestation": attestationBlock]
-        if let keyId = appAttestKeyId {
-            body["appAttestKeyId"] = keyId
-        }
-        if let assertion = appAttestAssertion {
-            body["appAttestAssertion"] = assertion
-        }
-        if let clientData = appAttestClientData {
-            body["appAttestClientData"] = clientData
-        }
+        let body: [String: String] = ["attestation": attestationBlock]
         do {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         } catch {

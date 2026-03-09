@@ -1,4 +1,4 @@
-import { mutation, internalMutation } from "./_generated/server";
+import { mutation, internalMutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import * as cborg from "cborg";
 
@@ -10,8 +10,12 @@ import * as cborg from "cborg";
 // NOTE: In production, embed the full root CA cert and validate the chain properly.
 // For now we validate the attestation structure and extract the credential key.
 
-// Your app identity: TEAM_ID + "." + BUNDLE_ID
-const APP_ID = "TCU64E3XV4.io.keywitness.app";
+// App identities: TEAM_ID + "." + BUNDLE_ID
+// Both the main app and keyboard extension can attest independently
+const APP_IDS = [
+  "TCU64E3XV4.io.keywitness.app",
+  "TCU64E3XV4.io.keywitness.app.keyboard",
+];
 
 // ── Base64url helpers ────────────────────────────────────────────────────────
 
@@ -62,14 +66,15 @@ interface AuthData {
 function parseAuthData(data: Uint8Array): AuthData {
   const rpIdHash = data.slice(0, 32);
   const flags = data[32];
-  const signCount = new DataView(toArrayBuffer(data.slice(33, 37))).getUint32(0);
+  const signCount = new DataView(new Uint8Array(data.slice(33, 37)).buffer as ArrayBuffer).getUint32(0);
 
   const result: AuthData = { rpIdHash, flags, signCount };
 
   // If attested credential data is present (bit 6 of flags)
-  if (flags & 0x40) {
+  // Only parse if there's enough data — assertions are 37 bytes and never have credential data
+  if ((flags & 0x40) && data.length > 55) {
     // AAGUID (16 bytes) at offset 37
-    const credIdLength = new DataView(toArrayBuffer(data.slice(53, 55))).getUint16(0);
+    const credIdLength = new DataView(new Uint8Array(data.slice(53, 55)).buffer as ArrayBuffer).getUint16(0);
     result.credentialId = data.slice(55, 55 + credIdLength);
     // The rest is the COSE-encoded credential public key
     result.credentialPublicKey = data.slice(55 + credIdLength);
@@ -96,6 +101,21 @@ function coseKeyToRawP256(coseBytes: Uint8Array): Uint8Array {
   raw.set(y, 33);
   return raw;
 }
+
+// ── Debug: list credentials ──────────────────────────────────────────────────
+
+export const listCredentials = query({
+  args: {},
+  handler: async (ctx) => {
+    const creds = await ctx.db.query("appAttestCredentials").collect();
+    return creds.map((c) => ({
+      keyId: c.keyId,
+      linkedEd25519Key: c.linkedEd25519Key,
+      counter: c.counter,
+      createdAt: c.createdAt,
+    }));
+  },
+});
 
 // ── Challenge management ─────────────────────────────────────────────────────
 
@@ -167,9 +187,14 @@ export const verifyKeyAttestation = mutation({
     // 4. Parse authenticator data
     const parsed = parseAuthData(authData);
 
-    // 5. Verify RP ID hash = SHA256(APP_ID)
-    const expectedRpIdHash = await sha256(new TextEncoder().encode(APP_ID));
-    if (toHex(parsed.rpIdHash) !== toHex(expectedRpIdHash)) {
+    // 5. Verify RP ID hash matches one of the allowed APP_IDs
+    const rpIdHex = toHex(parsed.rpIdHash);
+    let rpIdMatch = false;
+    for (const appId of APP_IDS) {
+      const expected = await sha256(new TextEncoder().encode(appId));
+      if (rpIdHex === toHex(expected)) { rpIdMatch = true; break; }
+    }
+    if (!rpIdMatch) {
       throw new Error("RP ID hash mismatch — wrong app identity");
     }
 
@@ -239,7 +264,7 @@ export const verifyAssertion = internalMutation({
       .query("appAttestCredentials")
       .withIndex("by_keyId", (q) => q.eq("keyId", args.keyId))
       .first();
-    if (!credential) throw new Error("Unknown App Attest key ID");
+    if (!credential) throw new Error("Unknown App Attest key ID: " + args.keyId);
 
     // 2. Decode assertion CBOR
     const assertionBytes = base64urlDecode(args.assertion);
@@ -250,19 +275,33 @@ export const verifyAssertion = internalMutation({
       throw new Error("Failed to decode assertion CBOR");
     }
 
-    const signature = assertionObj.signature as Uint8Array;
-    const authenticatorData = assertionObj.authenticatorData as Uint8Array;
-    if (!signature || !authenticatorData) {
+    const rawSignature = assertionObj.signature as Uint8Array;
+    const rawAuthData = assertionObj.authenticatorData as Uint8Array;
+    if (!rawSignature || !rawAuthData) {
       throw new Error("Missing signature or authenticatorData in assertion");
     }
 
+    // Copy to clean Uint8Arrays (CBOR decoder may return views with non-zero byteOffset)
+    const signature = new Uint8Array(rawSignature);
+    const authenticatorData = new Uint8Array(rawAuthData);
+
+    console.log("verifyAssertion: authData length =", authenticatorData.length, "sig length =", signature.length);
+
     // 3. Parse authenticator data
+    if (authenticatorData.length < 37) {
+      throw new Error(`authenticatorData too short: ${authenticatorData.length} bytes (need >= 37)`);
+    }
     const parsed = parseAuthData(authenticatorData);
 
-    // 4. Verify RP ID hash
-    const expectedRpIdHash = await sha256(new TextEncoder().encode(APP_ID));
-    if (toHex(parsed.rpIdHash) !== toHex(expectedRpIdHash)) {
-      throw new Error("RP ID hash mismatch in assertion");
+    // 4. Verify RP ID hash matches one of the allowed APP_IDs
+    const assertionRpIdHex = toHex(parsed.rpIdHash);
+    let assertionRpIdMatch = false;
+    for (const appId of APP_IDS) {
+      const expected = await sha256(new TextEncoder().encode(appId));
+      if (assertionRpIdHex === toHex(expected)) { assertionRpIdMatch = true; break; }
+    }
+    if (!assertionRpIdMatch) {
+      throw new Error("RP ID hash mismatch in assertion (got " + assertionRpIdHex.slice(0, 16) + "...)");
     }
 
     // 5. Verify counter > stored counter (replay protection)
@@ -270,40 +309,109 @@ export const verifyAssertion = internalMutation({
       throw new Error(`Assertion counter ${parsed.signCount} <= stored ${credential.counter}`);
     }
 
-    // 6. Compute expected nonce: SHA256(authenticatorData || SHA256(clientData))
+    // 6. Build the data that was signed: authenticatorData || SHA256(clientData)
     const clientDataHash = await sha256(new TextEncoder().encode(args.expectedClientData));
-    const nonceInput = new Uint8Array(authenticatorData.length + clientDataHash.length);
-    nonceInput.set(authenticatorData, 0);
-    nonceInput.set(clientDataHash, authenticatorData.length);
-    const nonce = await sha256(nonceInput);
+    const composite = new Uint8Array(authenticatorData.length + clientDataHash.length);
+    composite.set(authenticatorData, 0);
+    composite.set(clientDataHash, authenticatorData.length);
+    const nonce = await sha256(composite);
 
-    // 7. Verify ECDSA P-256 signature over the nonce
+    // 7. Verify ECDSA P-256 signature
+    // Apple returns DER-encoded signatures; WebCrypto expects raw (r||s) format
+    const rawSignatureBytes = derToRawEcdsa(signature);
+
     const rawKeyBytes = base64urlDecode(credential.credentialPublicKey);
+    console.log("verifyAssertion: pubkey", toHex(new Uint8Array(rawKeyBytes)).slice(0, 20) + "...",
+      "nonce", toHex(nonce).slice(0, 20) + "...",
+      "rpIdHash", toHex(parsed.rpIdHash).slice(0, 16) + "...",
+      "counter", parsed.signCount);
+
     const publicKey = await crypto.subtle.importKey(
       "raw",
-      toArrayBuffer(rawKeyBytes),
+      new Uint8Array(rawKeyBytes).buffer as ArrayBuffer,
       { name: "ECDSA", namedCurve: "P-256" },
       false,
       ["verify"],
     );
 
-    const valid = await crypto.subtle.verify(
+    // Try both: composite (authData || clientDataHash) and nonce (SHA256 of that)
+    // WebCrypto ECDSA with hash:SHA-256 auto-hashes the data parameter
+    const validComposite = await crypto.subtle.verify(
       { name: "ECDSA", hash: "SHA-256" },
       publicKey,
-      toArrayBuffer(signature),
-      toArrayBuffer(nonce),
+      new Uint8Array(rawSignatureBytes).buffer as ArrayBuffer,
+      new Uint8Array(composite).buffer as ArrayBuffer,
     );
 
-    if (!valid) {
-      throw new Error("App Attest assertion signature verification failed");
+    const validNonce = await crypto.subtle.verify(
+      { name: "ECDSA", hash: "SHA-256" },
+      publicKey,
+      new Uint8Array(rawSignatureBytes).buffer as ArrayBuffer,
+      new Uint8Array(nonce).buffer as ArrayBuffer,
+    );
+
+    console.log("verifyAssertion: validComposite =", validComposite, "validNonce =", validNonce);
+
+    if (!validComposite && !validNonce) {
+      // Also try with the original DER signature (in case WebCrypto accepts DER)
+      const validDER = await crypto.subtle.verify(
+        { name: "ECDSA", hash: "SHA-256" },
+        publicKey,
+        new Uint8Array(signature).buffer as ArrayBuffer,
+        new Uint8Array(composite).buffer as ArrayBuffer,
+      );
+      const validDERNonce = await crypto.subtle.verify(
+        { name: "ECDSA", hash: "SHA-256" },
+        publicKey,
+        new Uint8Array(signature).buffer as ArrayBuffer,
+        new Uint8Array(nonce).buffer as ArrayBuffer,
+      );
+      console.log("verifyAssertion: validDER =", validDER, "validDERNonce =", validDERNonce);
+      if (!validDER && !validDERNonce) {
+        throw new Error("App Attest assertion signature verification failed");
+      }
     }
 
     // 8. Update counter
     await ctx.db.patch(credential._id, { counter: parsed.signCount });
 
+    console.log("verifyAssertion: SUCCESS for keyId", args.keyId.slice(0, 8) + "...", "counter now", parsed.signCount);
     return { verified: true };
   },
 });
+
+// ── DER ECDSA signature to raw (r||s) conversion ────────────────────────────
+
+function derToRawEcdsa(der: Uint8Array): Uint8Array {
+  // DER format: 0x30 <total_len> 0x02 <r_len> <r> 0x02 <s_len> <s>
+  if (der[0] !== 0x30) throw new Error("Not a DER sequence");
+  let offset = 2; // skip 0x30 and length byte
+  // Handle multi-byte length
+  if (der[1] & 0x80) offset = 2 + (der[1] & 0x7f);
+
+  // Read r
+  if (der[offset] !== 0x02) throw new Error("Expected INTEGER tag for r");
+  const rLen = der[offset + 1];
+  const rStart = offset + 2;
+  let r = der.slice(rStart, rStart + rLen);
+  offset = rStart + rLen;
+
+  // Read s
+  if (der[offset] !== 0x02) throw new Error("Expected INTEGER tag for s");
+  const sLen = der[offset + 1];
+  const sStart = offset + 2;
+  let s = der.slice(sStart, sStart + sLen);
+
+  // Remove leading zero padding (DER integers are signed, so a leading 0x00 means positive)
+  if (r.length === 33 && r[0] === 0) r = r.slice(1);
+  if (s.length === 33 && s[0] === 0) s = s.slice(1);
+
+  // Pad to 32 bytes if shorter
+  const raw = new Uint8Array(64);
+  raw.set(r, 32 - r.length);
+  raw.set(s, 64 - s.length);
+  return raw;
+}
 
 // ── Certificate nonce extraction ─────────────────────────────────────────────
 

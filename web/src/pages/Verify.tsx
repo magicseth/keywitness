@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { verifyAttestation, VerificationResult, KeystrokeTiming, ProofVerificationResult, TrustStatus } from "../lib/verify";
+import Nav from "../components/Nav";
 
 // ── Known keys localStorage helpers ─────────────────────────────────────────
 
@@ -156,102 +157,153 @@ export default function Verify({ shortId }: { shortId?: string }) {
         : "invalid"
     : null;
 
+  const writerName = keyRecord ? keyRecord.name : knownKeyName;
+  const hasDeviceVerification = !!attestationDoc?.deviceVerified;
+  const hasFaceId = !!attestationDoc?.biometricSignature;
+  const hasKeystrokeData = !!(result?.keystrokeTimings && result.keystrokeTimings.length > 0);
+
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-gray-100">
+      <Nav />
       <div className="max-w-3xl mx-auto px-4 py-12">
-        {/* Header */}
-        <div className="mb-10">
-          <h1 className="text-3xl font-bold tracking-tight text-white mb-2">
-            KeyWitness
-          </h1>
-          <p className="text-gray-400 text-lg">
-            Was this written by a real person? Check here.
-          </p>
-        </div>
 
-        {/* Input */}
-        <div className="mb-6">
-          <textarea
-            className="w-full h-48 bg-[#111111] border border-gray-800 rounded-lg p-4 font-mono text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-gray-600 focus:ring-1 focus:ring-gray-600 resize-y"
-            placeholder={`-----BEGIN KEYWITNESS ATTESTATION-----\n(paste attestation here)\n-----END KEYWITNESS ATTESTATION-----`}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-                onVerifyClick();
-              }
-            }}
-          />
-        </div>
+        {/* ── No result yet: show landing ── */}
+        {!result && !verifying && (
+          <div className="text-center py-20">
+            <h1 className="text-4xl font-bold tracking-tight text-white mb-3">
+              Was this written by a real person?
+            </h1>
+            <p className="text-gray-400 text-lg mb-2">
+              Paste a KeyWitness attestation below to find out.
+            </p>
+          </div>
+        )}
 
-        <div className="mb-8">
-          <button
-            onClick={onVerifyClick}
-            disabled={verifying || !input.trim()}
-            className="px-6 py-2.5 bg-white text-black font-medium rounded-lg hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          >
-            {verifying ? "Checking..." : "Verify"}
-          </button>
-          <span className="ml-3 text-gray-600 text-sm">
-            or press Cmd/Ctrl + Enter
-          </span>
-        </div>
+        {/* ── Loading state ── */}
+        {verifying && !result && (
+          <div className="text-center py-20">
+            <div className="text-gray-400 text-lg">Checking...</div>
+          </div>
+        )}
 
-        {/* Results */}
+        {/* ── Results ── */}
         {result && (
-          <div className="border border-gray-800 rounded-lg overflow-hidden mb-10">
-            {/* Status banner */}
-            <div
-              className={`px-5 py-3 flex items-center gap-3 ${
-                status === "verified"
-                  ? "bg-green-950/50 border-b border-green-900/50"
-                  : status === "invalid"
-                    ? "bg-red-950/50 border-b border-red-900/50"
-                    : "bg-yellow-950/50 border-b border-yellow-900/50"
-              }`}
-            >
-              <span
-                className={`inline-block w-2.5 h-2.5 rounded-full ${
+          <div className="mb-12">
+            {/* Hero: Who wrote what */}
+            <div className={`rounded-xl p-6 mb-6 ${
+              status === "verified"
+                ? "bg-green-950/30 border border-green-900/40"
+                : status === "invalid"
+                  ? "bg-red-950/30 border border-red-900/40"
+                  : "bg-yellow-950/30 border border-yellow-900/40"
+            }`}>
+              {/* Status */}
+              <div className="flex items-center gap-3 mb-4">
+                <span className={`inline-flex items-center justify-center w-10 h-10 rounded-full text-lg font-bold ${
                   status === "verified"
-                    ? "bg-green-400"
+                    ? "bg-green-500/20 text-green-400"
                     : status === "invalid"
-                      ? "bg-red-400"
-                      : "bg-yellow-400"
-                }`}
-              />
-              <span
-                className={`font-semibold tracking-wide text-sm ${
-                  status === "verified"
-                    ? "text-green-400"
-                    : status === "invalid"
-                      ? "text-red-400"
-                      : "text-yellow-400"
-                }`}
-              >
-                {status === "verified"
-                  ? "HUMAN"
-                  : status === "invalid"
-                    ? "SUSPICIOUS"
-                    : "ERROR"}
-              </span>
-              <span className="text-gray-500 text-xs">
-                {status === "verified"
-                  ? "A real person typed this on a real device. It hasn't been changed."
-                  : status === "invalid"
-                    ? "Something doesn't add up. This message may have been altered or faked."
-                    : ""}
-              </span>
-              {result.version && (
-                <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-gray-800 text-gray-500 font-mono">
-                  {result.version}
+                      ? "bg-red-500/20 text-red-400"
+                      : "bg-yellow-500/20 text-yellow-400"
+                }`}>
+                  {status === "verified" ? "\u2713" : status === "invalid" ? "!" : "?"}
                 </span>
+                <div>
+                  <div className={`text-xl font-bold ${
+                    status === "verified" ? "text-green-400"
+                      : status === "invalid" ? "text-red-400"
+                        : "text-yellow-400"
+                  }`}>
+                    {status === "verified" ? "Typed by a human" : status === "invalid" ? "Suspicious" : "Error"}
+                  </div>
+                  <div className="text-gray-500 text-sm">
+                    {status === "verified"
+                      ? "This was typed on a real device and hasn't been changed."
+                      : status === "invalid"
+                        ? "Something doesn't add up. This may have been altered or faked."
+                        : ""}
+                  </div>
+                </div>
+                {result.version && (
+                  <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-gray-800 text-gray-500 font-mono">
+                    {result.version}
+                  </span>
+                )}
+              </div>
+
+              {/* Writer + Message */}
+              {!isError && (
+                <div className="space-y-4">
+                  {/* Who */}
+                  {result.publicKey && (
+                    <div>
+                      <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">Who</div>
+                      <div className="text-white text-lg font-semibold">
+                        {writerName || (keyRecord === null ? "Unknown person" : "Looking up...")}
+                      </div>
+                      {result.timestamp && (
+                        <div className="text-gray-500 text-sm mt-0.5">
+                          {formatTimestamp(result.timestamp)}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* What they wrote */}
+                  {result.cleartext ? (
+                    <div>
+                      <div className="text-xs text-gray-500 uppercase tracking-wider mb-1 flex items-center gap-2">
+                        What they wrote
+                        {result.encrypted && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/50 text-blue-400 font-medium uppercase">
+                            Decrypted
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-gray-200 text-base leading-relaxed bg-black/30 rounded-lg p-4 break-all">
+                        {result.cleartext}
+                      </div>
+                    </div>
+                  ) : result.encrypted && !result.cleartext ? (
+                    <div>
+                      <div className="text-xs text-gray-500 uppercase tracking-wider mb-1 flex items-center gap-2">
+                        What they wrote
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/50 text-blue-400 font-medium uppercase">
+                          Locked
+                        </span>
+                      </div>
+                      <div className="text-gray-500 text-sm italic mb-3">
+                        {result.decryptionFailed
+                          ? "Couldn't unlock the message. The link may be incomplete."
+                          : "This message is encrypted. Open the full link from the sender, or paste the text below."}
+                      </div>
+                      <textarea
+                        className="w-full h-24 bg-[#0a0a0a] border border-gray-700 rounded-lg p-3 font-mono text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-gray-600 focus:ring-1 focus:ring-gray-600 resize-y mb-2"
+                        placeholder="Paste the original text here to check if it matches..."
+                        value={manualCleartext}
+                        onChange={(e) => setManualCleartext(e.target.value)}
+                      />
+                      <button
+                        onClick={() => handleVerify(input, manualCleartext)}
+                        disabled={verifying || !manualCleartext.trim()}
+                        className="px-4 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                      >
+                        Check match
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              )}
+
+              {/* Error */}
+              {result.error && (
+                <p className="text-red-400 text-sm mt-3">{result.error}</p>
               )}
             </div>
 
             {/* Trust warnings */}
             {trustStatus && (trustStatus.keyRevoked || trustStatus.credentialRevoked || trustStatus.appVersionTrusted === false) && (
-              <div className="px-5 py-3 bg-orange-950/50 border-b border-orange-900/50">
+              <div className="rounded-lg px-5 py-3 bg-orange-950/50 border border-orange-900/50 mb-6">
                 <div className="flex items-center gap-2 mb-1">
                   <span className="inline-block w-2 h-2 rounded-full bg-orange-400" />
                   <span className="text-orange-400 text-xs font-semibold uppercase tracking-wide">Trust Warning</span>
@@ -270,326 +322,241 @@ export default function Verify({ shortId }: { shortId?: string }) {
               </div>
             )}
 
-            {/* Error message */}
-            {result.error && (
-              <div className="px-5 py-3 bg-[#111111] border-b border-gray-800">
-                <p className="text-red-400 text-sm">{result.error}</p>
+            {/* ── Verified / Not Verified columns ── */}
+            {!isError && status === "verified" && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                {/* Verified */}
+                <div className="rounded-lg border border-green-900/40 bg-[#111111] p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="w-5 h-5 rounded-full bg-green-500/20 text-green-400 flex items-center justify-center text-xs font-bold">{"\u2713"}</span>
+                    <span className="text-green-400 text-sm font-semibold uppercase tracking-wide">Verified</span>
+                  </div>
+                  <ul className="space-y-2 text-sm">
+                    <li className="flex items-start gap-2">
+                      <span className="text-green-400 mt-0.5">{"\u2713"}</span>
+                      <span className="text-gray-300">Message hasn't been tampered with</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-green-400 mt-0.5">{"\u2713"}</span>
+                      <span className="text-gray-300">Typed by a person (not copy-pasted)</span>
+                    </li>
+                    {hasDeviceVerification && (
+                      <li className="flex items-start gap-2">
+                        <span className="text-green-400 mt-0.5">{"\u2713"}</span>
+                        <span className="text-gray-300">Real Apple device confirmed</span>
+                      </li>
+                    )}
+                    {hasFaceId && (
+                      <li className="flex items-start gap-2">
+                        <span className="text-green-400 mt-0.5">{"\u2713"}</span>
+                        <span className="text-gray-300">
+                          Face ID confirmed by sender
+                          {attestationDoc?.biometricTimestamp && (
+                            <span className="text-gray-600"> ({Math.round((attestationDoc.biometricTimestamp - attestationDoc.createdAt) / 1000)}s after typing)</span>
+                          )}
+                        </span>
+                      </li>
+                    )}
+                    {writerName && (
+                      <li className="flex items-start gap-2">
+                        <span className="text-green-400 mt-0.5">{"\u2713"}</span>
+                        <span className="text-gray-300">Registered as "{writerName}"</span>
+                      </li>
+                    )}
+                  </ul>
+                </div>
+
+                {/* Not Verified */}
+                <div className="rounded-lg border border-gray-800 bg-[#111111] p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="w-5 h-5 rounded-full bg-gray-700 text-gray-400 flex items-center justify-center text-xs font-bold">–</span>
+                    <span className="text-gray-400 text-sm font-semibold uppercase tracking-wide">Not verified</span>
+                  </div>
+                  <ul className="space-y-2 text-sm">
+                    {!hasDeviceVerification && (
+                      <li className="flex items-start gap-2">
+                        <span className="text-gray-600 mt-0.5">–</span>
+                        <span className="text-gray-500">Device not confirmed as a real iPhone</span>
+                      </li>
+                    )}
+                    {!hasFaceId && (
+                      <li className="flex items-start gap-2">
+                        <span className="text-gray-600 mt-0.5">–</span>
+                        <span className="text-gray-500">Face ID not confirmed</span>
+                      </li>
+                    )}
+                    {!writerName && (
+                      <li className="flex items-start gap-2">
+                        <span className="text-gray-600 mt-0.5">–</span>
+                        <span className="text-gray-500">Sender hasn't registered their name</span>
+                      </li>
+                    )}
+                    <li className="flex items-start gap-2">
+                      <span className="text-gray-600 mt-0.5">–</span>
+                      <span className="text-gray-500">Content originality — could be retyped from AI</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-gray-600 mt-0.5">–</span>
+                      <span className="text-gray-500">Whether the message was typed voluntarily</span>
+                    </li>
+                  </ul>
+                </div>
               </div>
             )}
 
-            {/* Detail fields */}
+            {/* ── Details (collapsed) ── */}
             {!isError && (
-              <div className="divide-y divide-gray-800">
-                {/* Cleartext display */}
-                {result.cleartext ? (
+              <details className="group border border-gray-800 rounded-lg overflow-hidden mb-6">
+                <summary className="px-5 py-3 bg-[#111111] cursor-pointer text-sm text-gray-400 hover:text-gray-300 transition-colors flex items-center gap-2">
+                  <span className="text-gray-600 group-open:rotate-90 transition-transform">{"\u25B6"}</span>
+                  Technical details
+                </summary>
+                <div className="divide-y divide-gray-800">
+                  {/* Device */}
                   <div className="px-5 py-3 bg-[#111111]">
-                    <div className="text-xs text-gray-500 uppercase tracking-wider mb-1 flex items-center gap-2">
-                      Message
-                      {result.encrypted && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/50 text-blue-400 font-medium uppercase">
-                          Decrypted
-                        </span>
+                    <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">Device</div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-gray-200 text-sm">{result.deviceId}</span>
+                      {attestationDoc?.deviceVerified ? (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-900/50 text-green-400 font-medium">Real Apple device</span>
+                      ) : result?.appAttestPresent ? (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-900/50 text-yellow-400 font-medium">Unconfirmed</span>
+                      ) : (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-800 text-gray-500 font-medium">Not verified</span>
                       )}
                     </div>
-                    <div className="text-gray-200 text-sm break-all">
-                      {result.cleartext}
-                    </div>
                   </div>
-                ) : result.encrypted && !result.cleartext ? (
-                  <div className="px-5 py-3 bg-[#111111]">
-                    <div className="text-xs text-gray-500 uppercase tracking-wider mb-1 flex items-center gap-2">
-                      Message
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/50 text-blue-400 font-medium uppercase">
-                        Locked
-                      </span>
-                    </div>
-                    <div className="text-gray-500 text-sm italic mb-3">
-                      {result.decryptionFailed
-                        ? "Couldn't unlock the message. The link may be incomplete or the key is wrong."
-                        : "This message is encrypted. Open the full link from the sender, or paste the original text below to check if it matches."}
-                    </div>
-                    <textarea
-                      className="w-full h-24 bg-[#0a0a0a] border border-gray-700 rounded-lg p-3 font-mono text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-gray-600 focus:ring-1 focus:ring-gray-600 resize-y mb-2"
-                      placeholder="Paste the original text here to check if it matches..."
-                      value={manualCleartext}
-                      onChange={(e) => setManualCleartext(e.target.value)}
-                    />
-                    <button
-                      onClick={() => handleVerify(input, manualCleartext)}
-                      disabled={verifying || !manualCleartext.trim()}
-                      className="px-4 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                    >
-                      Check match
-                    </button>
-                  </div>
-                ) : (
-                  <Field label="Message" value={result.cleartext} />
-                )}
 
-                {/* Who wrote it */}
-                {result.publicKey && (
-                  <div className="px-5 py-3 bg-[#111111]">
-                    <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">
-                      Written By
-                    </div>
-                    <div
-                      className={`text-sm font-medium ${
-                        keyRecord
-                          ? "text-green-400"
-                          : keyRecord === null
-                            ? "text-gray-400"
-                            : "text-gray-500"
-                      }`}
-                    >
-                      {keyRecord
-                        ? keyRecord.name
-                        : keyRecord === null
-                          ? "Unknown sender (key not registered)"
-                          : "Looking up..."}
-                    </div>
-                  </div>
-                )}
+                  {/* Proof Chain */}
+                  {result.proofs && result.proofs.length > 0 && (
+                    <ProofChain proofs={result.proofs} />
+                  )}
 
-                {/* Device */}
-                <div className="px-5 py-3 bg-[#111111]">
-                  <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">
-                    Device
-                  </div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-gray-200 text-sm">
-                      {result.deviceId}
-                    </span>
-                    {attestationDoc?.deviceVerified ? (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-900/50 text-green-400 font-medium">
-                        Real Apple device
-                      </span>
-                    ) : result?.appAttestPresent ? (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-900/50 text-yellow-400 font-medium">
-                        Unconfirmed
-                      </span>
-                    ) : (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-800 text-gray-500 font-medium">
-                        Not verified
-                      </span>
-                    )}
-                  </div>
-                </div>
+                  {/* Issuer DID */}
+                  {result.issuerDID && (
+                    <div className="px-5 py-3 bg-[#111111]">
+                      <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">Issuer DID</div>
+                      <div className="text-gray-400 text-xs font-mono break-all">{result.issuerDID}</div>
+                    </div>
+                  )}
 
-                {/* Face ID */}
-                <div className="px-5 py-3 bg-[#111111]">
-                  <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">
-                    Face ID
-                  </div>
-                  {attestationDoc?.biometricSignature ? (
-                    <div className="flex items-center gap-2">
-                      <span className="text-green-400 text-sm font-medium">
-                        Confirmed by the sender
-                      </span>
-                      {attestationDoc.biometricTimestamp && (
-                        <span className="text-gray-500 text-xs">
-                          {Math.round((attestationDoc.biometricTimestamp - attestationDoc.createdAt) / 1000)}s after typing
-                        </span>
+                  {/* Signing Key */}
+                  {result.publicKeyFingerprint && (
+                    <div className="px-5 py-3 bg-[#111111]">
+                      <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">Signing Key</div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-gray-200 text-sm font-mono break-all">{result.publicKeyFingerprint}</span>
+                        {result.publicKey && knownKeyName ? (
+                          <span className="inline-flex items-center gap-1 text-sm text-green-400 font-medium">
+                            {knownKeyName}
+                            <button
+                              onClick={() => { removeKnownKey(result.publicKey!); setKnownKeyName(undefined); setKnownKeyVersion((v) => v + 1); }}
+                              className="text-gray-500 hover:text-red-400 text-xs ml-1"
+                              title="Forget this key"
+                            >x</button>
+                          </span>
+                        ) : result.publicKey && !savingKeyName ? (
+                          <button onClick={() => setSavingKeyName(true)} className="text-xs text-gray-500 hover:text-blue-400 transition-colors">
+                            Remember this key
+                          </button>
+                        ) : null}
+                      </div>
+                      {savingKeyName && result.publicKey && (
+                        <div className="flex items-center gap-2 mt-2">
+                          <input
+                            type="text"
+                            className="bg-[#0a0a0a] border border-gray-700 rounded px-2 py-1 text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-gray-600"
+                            placeholder="Name this person..."
+                            value={keyNameInput}
+                            onChange={(e) => setKeyNameInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && keyNameInput.trim()) {
+                                saveKnownKey(result.publicKey!, keyNameInput.trim());
+                                setKnownKeyName(keyNameInput.trim());
+                                setSavingKeyName(false);
+                                setKeyNameInput("");
+                                setKnownKeyVersion((v) => v + 1);
+                              } else if (e.key === "Escape") {
+                                setSavingKeyName(false);
+                                setKeyNameInput("");
+                              }
+                            }}
+                            autoFocus
+                          />
+                          <button
+                            onClick={() => { if (keyNameInput.trim()) { saveKnownKey(result.publicKey!, keyNameInput.trim()); setKnownKeyName(keyNameInput.trim()); setSavingKeyName(false); setKeyNameInput(""); setKnownKeyVersion((v) => v + 1); }}}
+                            disabled={!keyNameInput.trim()}
+                            className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-500 disabled:opacity-40 transition-colors"
+                          >Save</button>
+                          <button
+                            onClick={() => { setSavingKeyName(false); setKeyNameInput(""); }}
+                            className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                          >Cancel</button>
+                        </div>
                       )}
                     </div>
-                  ) : attestationDoc && !attestationDoc.biometricSignature ? (
-                    <span className="text-gray-500 text-sm">
-                      Not confirmed
-                    </span>
-                  ) : (
-                    <span className="text-gray-500 text-sm">Checking...</span>
                   )}
                 </div>
 
-                {/* Proof Chain (v3 only) */}
-                {result.proofs && result.proofs.length > 0 && (
-                  <ProofChain proofs={result.proofs} />
+                {/* Keystroke Timeline */}
+                {hasKeystrokeData && (
+                  <KeystrokeTimeline timings={result.keystrokeTimings!} />
                 )}
-
-                {/* When */}
-                <Field
-                  label="When"
-                  value={
-                    result.timestamp
-                      ? formatTimestamp(result.timestamp)
-                      : undefined
-                  }
-                />
-
-                {/* Identity */}
-                {result.issuerDID && (
-                  <div className="px-5 py-3 bg-[#111111]">
-                    <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">
-                      Issuer DID
-                    </div>
-                    <div className="text-gray-400 text-xs font-mono break-all">
-                      {result.issuerDID}
-                    </div>
-                  </div>
-                )}
-
-                {/* Signing Key */}
-                {result.publicKeyFingerprint && (
-                  <div className="px-5 py-3 bg-[#111111]">
-                    <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">
-                      Signing Key
-                    </div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-gray-200 text-sm font-mono break-all">
-                        {result.publicKeyFingerprint}
-                      </span>
-                      {result.publicKey && knownKeyName ? (
-                        <span className="inline-flex items-center gap-1 text-sm text-green-400 font-medium">
-                          {knownKeyName}
-                          <button
-                            onClick={() => {
-                              removeKnownKey(result.publicKey!);
-                              setKnownKeyName(undefined);
-                              setKnownKeyVersion((v) => v + 1);
-                            }}
-                            className="text-gray-500 hover:text-red-400 text-xs ml-1"
-                            title="Forget this key"
-                          >
-                            x
-                          </button>
-                        </span>
-                      ) : result.publicKey && !savingKeyName ? (
-                        <button
-                          onClick={() => setSavingKeyName(true)}
-                          className="text-xs text-gray-500 hover:text-blue-400 transition-colors"
-                        >
-                          Remember this key
-                        </button>
-                      ) : null}
-                    </div>
-                    {savingKeyName && result.publicKey && (
-                      <div className="flex items-center gap-2 mt-2">
-                        <input
-                          type="text"
-                          className="bg-[#0a0a0a] border border-gray-700 rounded px-2 py-1 text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-gray-600"
-                          placeholder="Name this person..."
-                          value={keyNameInput}
-                          onChange={(e) => setKeyNameInput(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" && keyNameInput.trim()) {
-                              saveKnownKey(result.publicKey!, keyNameInput.trim());
-                              setKnownKeyName(keyNameInput.trim());
-                              setSavingKeyName(false);
-                              setKeyNameInput("");
-                              setKnownKeyVersion((v) => v + 1);
-                            } else if (e.key === "Escape") {
-                              setSavingKeyName(false);
-                              setKeyNameInput("");
-                            }
-                          }}
-                          autoFocus
-                        />
-                        <button
-                          onClick={() => {
-                            if (keyNameInput.trim()) {
-                              saveKnownKey(result.publicKey!, keyNameInput.trim());
-                              setKnownKeyName(keyNameInput.trim());
-                              setSavingKeyName(false);
-                              setKeyNameInput("");
-                              setKnownKeyVersion((v) => v + 1);
-                            }
-                          }}
-                          disabled={!keyNameInput.trim()}
-                          className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-500 disabled:opacity-40 transition-colors"
-                        >
-                          Save
-                        </button>
-                        <button
-                          onClick={() => {
-                            setSavingKeyName(false);
-                            setKeyNameInput("");
-                          }}
-                          className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
+              </details>
             )}
-
-            {/* Keystroke Timeline */}
-            {result.keystrokeTimings &&
-              result.keystrokeTimings.length > 0 && (
-                <KeystrokeTimeline timings={result.keystrokeTimings} />
-              )}
           </div>
         )}
 
-        {/* Explanation */}
+        {/* ── Attestation input (bottom) ── */}
+        <div className="border border-gray-800 rounded-lg p-5 mb-10">
+          <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">
+            {result ? "Verify another" : "Paste attestation"}
+          </h2>
+          <textarea
+            className="w-full h-32 bg-[#0a0a0a] border border-gray-800 rounded-lg p-4 font-mono text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-gray-600 focus:ring-1 focus:ring-gray-600 resize-y mb-3"
+            placeholder={`-----BEGIN KEYWITNESS ATTESTATION-----\n(paste attestation here)\n-----END KEYWITNESS ATTESTATION-----`}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                onVerifyClick();
+              }
+            }}
+          />
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onVerifyClick}
+              disabled={verifying || !input.trim()}
+              className="px-6 py-2.5 bg-white text-black font-medium rounded-lg hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              {verifying ? "Checking..." : "Verify"}
+            </button>
+            <span className="text-gray-600 text-sm">
+              Cmd/Ctrl + Enter
+            </span>
+          </div>
+        </div>
+
+        {/* ── How it works ── */}
         <div className="border border-gray-800 rounded-lg p-6 mb-10">
           <h2 className="text-lg font-semibold text-white mb-4">
             How does this work?
           </h2>
-          <div className="space-y-4 text-sm text-gray-400">
+          <div className="space-y-3 text-sm text-gray-400">
             <p>
               KeyWitness is a keyboard for iPhone that seals every message you type with a
               digital signature. When someone receives your message, they can verify here
               that it really came from you and hasn't been edited.
             </p>
-            <div>
-              <h3 className="text-gray-300 font-medium mb-1">
-                A green "Authentic" result means:
-              </h3>
-              <ul className="list-disc list-inside space-y-1 ml-1">
-                <li>
-                  The message is word-for-word what was originally typed
-                </li>
-                <li>
-                  It was typed on the device shown above
-                </li>
-                <li>
-                  Nobody has modified it since it was written
-                </li>
-                <li>
-                  If device-verified: it came from the real KeyWitness app on a genuine iPhone, not a fake
-                </li>
-                <li>
-                  If Face ID confirmed: the device owner personally verified the message
-                </li>
-              </ul>
-            </div>
-            <div>
-              <h3 className="text-gray-300 font-medium mb-1">
-                Standards
-              </h3>
-              <p>
-                KeyWitness v3 attestations use{" "}
-                <a href="https://www.w3.org/TR/vc-data-model-2.0/" className="text-blue-400 hover:underline" target="_blank" rel="noopener">
-                  W3C Verifiable Credentials 2.0
-                </a>{" "}
-                with the{" "}
-                <a href="https://www.w3.org/TR/vc-di-eddsa/" className="text-blue-400 hover:underline" target="_blank" rel="noopener">
-                  eddsa-jcs-2022
-                </a>{" "}
-                Data Integrity cryptosuite. Any VC-compatible verifier can validate them.
-              </p>
-            </div>
-            <div>
-              <h3 className="text-gray-300 font-medium mb-1">
-                It does not prove:
-              </h3>
-              <ul className="list-disc list-inside space-y-1 ml-1">
-                <li>Who the person behind the device is (unless they've registered their name)</li>
-                <li>
-                  That the message was typed voluntarily
-                </li>
-              </ul>
-            </div>
+            <p>
+              Verification happens entirely in your browser. Nothing is sent to any server.
+            </p>
           </div>
         </div>
 
         {/* Footer */}
         <footer className="text-center text-gray-600 text-xs py-6 border-t border-gray-800 space-y-2">
-          <div>
-            Verification happens entirely in your browser. Nothing is sent to any server.
-          </div>
           <div>
             <a href="/how" className="text-gray-500 hover:text-gray-300 transition-colors">
               Learn more about KeyWitness
@@ -649,30 +616,6 @@ function ProofChain({ proofs }: { proofs: ProofVerificationResult[] }) {
             )}
           </div>
         ))}
-      </div>
-    </div>
-  );
-}
-
-function Field({
-  label,
-  value,
-  mono,
-}: {
-  label: string;
-  value?: string;
-  mono?: boolean;
-}) {
-  if (!value) return null;
-  return (
-    <div className="px-5 py-3 bg-[#111111]">
-      <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">
-        {label}
-      </div>
-      <div
-        className={`text-gray-200 text-sm break-all ${mono ? "font-mono" : ""}`}
-      >
-        {value}
       </div>
     </div>
   );

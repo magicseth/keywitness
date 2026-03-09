@@ -99,3 +99,18 @@ export const addBiometricVerification = mutation({
     return { success: true };
   },
 });
+
+export const markDeviceVerified = mutation({
+  args: {
+    shortId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const doc = await ctx.db
+      .query("attestations")
+      .withIndex("by_shortId", (q) => q.eq("shortId", args.shortId))
+      .first();
+    if (!doc) throw new Error("Attestation not found");
+    await ctx.db.patch(doc._id, { deviceVerified: true });
+    return { success: true };
+  },
+});
