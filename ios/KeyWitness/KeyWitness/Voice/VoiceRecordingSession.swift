@@ -67,8 +67,10 @@ final class VoiceRecordingSession: NSObject, ARSessionDelegate {
 
         // Camera permission is requested by ARKit automatically when the session starts.
         // We check current status here.
-        let camera = AVCaptureDevice.authorizationStatus(for: .video) == .authorized
-            || await AVCaptureDevice.requestAccess(for: .video)
+        var camera = AVCaptureDevice.authorizationStatus(for: .video) == .authorized
+        if !camera {
+            camera = await AVCaptureDevice.requestAccess(for: .video)
+        }
 
         return (mic, speech, camera)
     }
@@ -78,9 +80,18 @@ final class VoiceRecordingSession: NSObject, ARSessionDelegate {
     func start() throws {
         guard !isRecording else { return }
 
-        // Verify microphone input source
+        // Start ARKit face tracking first (claims the camera)
+        guard ARFaceTrackingConfiguration.isSupported else {
+            throw VoiceRecordingError.faceTrackingUnsupported
+        }
+        let arConfig = ARFaceTrackingConfiguration()
+        arConfig.isLightEstimationEnabled = false
+        arSession.delegate = self
+        arSession.run(arConfig, options: [.resetTracking, .removeExistingAnchors])
+
+        // Configure audio session (compatible with ARKit camera)
         let audioSession = AVAudioSession.sharedInstance()
-        try audioSession.setCategory(.record, mode: .measurement)
+        try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
         try audioSession.setActive(true)
 
         let inputSource = verifyInputSource(audioSession)
@@ -132,15 +143,6 @@ final class VoiceRecordingSession: NSObject, ARSessionDelegate {
 
         try audioEngine.start()
 
-        // Start ARKit face tracking
-        guard ARFaceTrackingConfiguration.isSupported else {
-            throw VoiceRecordingError.faceTrackingUnsupported
-        }
-        let arConfig = ARFaceTrackingConfiguration()
-        arConfig.isLightEstimationEnabled = false
-        arSession.delegate = self
-        arSession.run(arConfig)
-
         recordingStartTime = ProcessInfo.processInfo.systemUptime
         isRecording = true
         NSLog("[VoiceAttest] Recording started")
@@ -163,8 +165,14 @@ final class VoiceRecordingSession: NSObject, ARSessionDelegate {
         audioEngine.inputNode.removeTap(onBus: 0)
         recognitionRequest?.endAudio()
 
-        // Stop ARKit
+        // Stop ARKit — pause only, will reset on next start()
         arSession.pause()
+
+        // Clean up speech recognition for reuse
+        recognitionTask?.cancel()
+        recognitionTask = nil
+        recognitionRequest = nil
+        speechRecognizer = nil
 
         // Compute audio hash
         let audioData = audioSamples.withUnsafeBufferPointer { ptr in
@@ -226,10 +234,10 @@ final class VoiceRecordingSession: NSObject, ARSessionDelegate {
                 mouthRight: bs[.mouthRight]?.floatValue ?? 0,
                 mouthSmileLeft: bs[.mouthSmileLeft]?.floatValue ?? 0,
                 mouthSmileRight: bs[.mouthSmileRight]?.floatValue ?? 0,
-                mouthUpperUpLeft: bs[.mouthUpperUp_L]?.floatValue ?? 0,
-                mouthUpperUpRight: bs[.mouthUpperUp_R]?.floatValue ?? 0,
-                mouthLowerDownLeft: bs[.mouthLowerDown_L]?.floatValue ?? 0,
-                mouthLowerDownRight: bs[.mouthLowerDown_R]?.floatValue ?? 0
+                mouthUpperUpLeft: bs[.mouthUpperUpLeft]?.floatValue ?? 0,
+                mouthUpperUpRight: bs[.mouthUpperUpRight]?.floatValue ?? 0,
+                mouthLowerDownLeft: bs[.mouthLowerDownLeft]?.floatValue ?? 0,
+                mouthLowerDownRight: bs[.mouthLowerDownRight]?.floatValue ?? 0
             )
             meshFrames.append(frame)
 

@@ -5,12 +5,13 @@ import SwiftUI
 /// Full-screen voice recording view controller.
 /// Shows the front camera with face tracking, real-time transcription,
 /// and controls to record/stop/seal.
-class VoiceRecordingViewController: UIViewController {
+class VoiceRecordingViewController: UIViewController, ARSCNViewDelegate {
 
     // MARK: - State
 
     private let recordingSession = VoiceRecordingSession()
     private var arView: ARSCNView!
+    private var faceGeometryNode: SCNNode?
     private var transcriptionLabel: UILabel!
     private var statusLabel: UILabel!
     private var recordButton: UIButton!
@@ -58,17 +59,13 @@ class VoiceRecordingViewController: UIViewController {
     // MARK: - UI Setup
 
     private func setupUI() {
-        // AR view (front camera preview)
+        // AR view (front camera preview with face mesh overlay)
         arView = ARSCNView(frame: .zero)
         arView.session = recordingSession.arSession
+        arView.delegate = self
+        arView.automaticallyUpdatesLighting = true
         arView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(arView)
-
-        // Dark overlay on camera
-        let overlay = UIView()
-        overlay.backgroundColor = UIColor.black.withAlphaComponent(0.3)
-        overlay.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(overlay)
 
         // Close button
         let closeButton = UIButton(type: .system)
@@ -118,11 +115,6 @@ class VoiceRecordingViewController: UIViewController {
             arView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             arView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             arView.heightAnchor.constraint(equalTo: view.heightAnchor, multiplier: 0.5),
-
-            overlay.topAnchor.constraint(equalTo: arView.topAnchor),
-            overlay.leadingAnchor.constraint(equalTo: arView.leadingAnchor),
-            overlay.trailingAnchor.constraint(equalTo: arView.trailingAnchor),
-            overlay.bottomAnchor.constraint(equalTo: arView.bottomAnchor),
 
             closeButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
             closeButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
@@ -208,6 +200,26 @@ class VoiceRecordingViewController: UIViewController {
                 statusLabel.textColor = .systemRed
             }
         }
+    }
+
+    // MARK: - ARSCNViewDelegate (Face Mesh Overlay)
+
+    func renderer(_ renderer: SCNSceneRenderer, nodeFor anchor: ARAnchor) -> SCNNode? {
+        guard let faceAnchor = anchor as? ARFaceAnchor else { return nil }
+        let faceGeometry = ARSCNFaceGeometry(device: arView.device!)!
+        faceGeometry.firstMaterial?.fillMode = .lines
+        faceGeometry.firstMaterial?.diffuse.contents = UIColor(red: 0.2, green: 0.8, blue: 1.0, alpha: 0.7)
+        faceGeometry.firstMaterial?.isDoubleSided = true
+        let node = SCNNode(geometry: faceGeometry)
+        faceGeometryNode = node
+        faceGeometry.update(from: faceAnchor.geometry)
+        return node
+    }
+
+    func renderer(_ renderer: SCNSceneRenderer, didUpdate node: SCNNode, for anchor: ARAnchor) {
+        guard let faceAnchor = anchor as? ARFaceAnchor,
+              let faceGeometry = node.geometry as? ARSCNFaceGeometry else { return }
+        faceGeometry.update(from: faceAnchor.geometry)
     }
 
     // MARK: - Seal (Build VC + Upload)
