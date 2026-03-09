@@ -345,14 +345,20 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
             {/* ── Verified ── */}
             {!isError && status === "verified" && (
               <div className="space-y-6">
-                {/* The message — front and center */}
-                <div className="rounded-2xl bg-[#111111] border border-gray-800/60 overflow-hidden">
+
+                {/* The message card */}
+                <div className="relative rounded-2xl overflow-hidden border border-gray-800/40" style={{ background: "linear-gradient(160deg, #141416 0%, #111113 60%, #0f1218 100%)" }}>
+
                   {/* Message content */}
-                  <div className="p-8">
+                  <div className="px-8 pt-8 pb-6 sm:px-10 sm:pt-10 sm:pb-8">
                     {result.cleartext ? (
-                      <blockquote className="text-xl leading-relaxed text-white font-light">
-                        <CleartextWithAttribution cleartext={result.cleartext} timings={result.keystrokeTimings} encrypted={result.encrypted} />
-                      </blockquote>
+                      <div className="relative pl-6">
+                        {/* Decorative quote accent — thin green bar */}
+                        <div className="absolute left-0 top-1 bottom-1 w-[3px] rounded-full bg-green-500/25" />
+                        <blockquote className="text-[22px] sm:text-[26px] leading-[1.45] text-white font-light tracking-[-0.01em]">
+                          <CleartextWithAttribution cleartext={result.cleartext} timings={result.keystrokeTimings} encrypted={result.encrypted} />
+                        </blockquote>
+                      </div>
                     ) : result.encrypted && !result.cleartext ? (
                       <div>
                         {result.cleartextLength ? (
@@ -400,50 +406,71 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
                       </div>
                     ) : null}
 
-                    {/* Attribution line */}
-                    <div className="mt-6 flex items-center gap-2 text-sm text-gray-500">
-                      <span className="text-gray-400 font-medium">
+                    {/* Signature */}
+                    <div className="mt-6 pl-6 flex items-center gap-2">
+                      <span className="text-gray-600">{"\u2014"}</span>
+                      <span className="text-white font-semibold text-[17px] italic tracking-tight">
                         {writerName || (keyRecord === null ? "Someone" : "...")}
                       </span>
-                      <span className="text-gray-700">{"\u00B7"}</span>
-                      {hasDeviceVerification ? (
-                        <span className="text-gray-400">iPhone</span>
-                      ) : (
-                        <span>unverified device</span>
-                      )}
-                      {result.timestamp && (
-                        <>
-                          <span className="text-gray-700">{"\u00B7"}</span>
-                          <span>{formatTimestampShort(result.timestamp)}</span>
-                        </>
-                      )}
+                      <span className="inline-flex items-center gap-1 text-green-400 text-xs font-semibold bg-green-500/10 px-2 py-0.5 rounded-full border border-green-500/15">
+                        <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
+                        </svg>
+                        human
+                      </span>
+                      <span className="text-gray-600 text-xs ml-2">
+                        {hasDeviceVerification && <>iPhone</>}
+                        {hasDeviceVerification && result.timestamp && <>{" · "}</>}
+                        {result.timestamp && <>{formatTimestampShort(result.timestamp)}</>}
+                      </span>
                     </div>
                   </div>
 
-                  {/* Verification strip */}
-                  <div className="px-8 py-4 bg-green-950/20 border-t border-green-900/20 flex items-center gap-6">
-                    <div className="flex items-center gap-2 text-green-400 text-sm font-medium">
-                      <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none">
-                        <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" />
-                        <path d="M5 8l2 2 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  {/* Verification strip — quiet, secondary */}
+                  <div className="px-8 sm:px-10 py-2.5 border-t border-gray-800/40 flex items-center gap-4 text-[11px] text-gray-600">
+                    <span className="text-green-500/70 flex items-center gap-1">
+                      <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
                       </svg>
                       Verified
-                    </div>
-                    <div className="flex items-center gap-4 text-xs text-gray-500">
-                      <span className={hasKeystrokeData ? "text-green-400/70" : ""} title={hasKeystrokeData ? "Typed by a person" : "No keystroke data"}>
-                        {hasKeystrokeData ? "\u2713" : "\u2013"} Keystrokes
-                      </span>
-                      <span className={hasDeviceVerification ? "text-green-400/70" : ""} title={hasDeviceVerification ? "Confirmed real Apple device" : "Device not confirmed"}>
-                        {hasDeviceVerification ? "\u2713" : "\u2013"} Device
-                      </span>
-                      <span className={hasFaceId ? "text-green-400/70" : ""} title={hasFaceId ? "Face ID confirmed" : "Face ID not confirmed"}>
-                        {hasFaceId ? "\u2713" : "\u2013"} Face ID
-                        {hasFaceId && attestationDoc?.biometricTimestamp && (
-                          <span className="text-gray-600 ml-1">{Math.round((attestationDoc.biometricTimestamp - attestationDoc.createdAt) / 1000)}s</span>
-                        )}
-                      </span>
-                    </div>
+                    </span>
+                    <span className={hasKeystrokeData ? "text-green-500/50" : ""}>
+                      {hasKeystrokeData ? "\u2713" : "\u2013"} Keystrokes
+                    </span>
+                    <span className={hasDeviceVerification ? "text-green-500/50" : ""}>
+                      {hasDeviceVerification ? "\u2713" : "\u2013"} Device
+                    </span>
+                    <span className={hasFaceId ? "text-green-500/50" : ""}>
+                      {hasFaceId ? "\u2713" : "\u2013"} Face ID
+                      {hasFaceId && attestationDoc?.biometricTimestamp && (
+                        <span className="ml-0.5">{Math.round((attestationDoc.biometricTimestamp - attestationDoc.createdAt) / 1000)}s</span>
+                      )}
+                    </span>
                   </div>
+                </div>
+
+                {/* What this means — plain English */}
+                <div className="rounded-xl bg-[#111111] border border-gray-800/60 p-6 space-y-3 text-sm text-gray-400">
+                  <div className="text-white font-semibold text-base mb-2">What this means</div>
+                  {hasKeystrokeData && (
+                    <p>
+                      <span className="text-green-400 font-medium">Keystrokes verified</span> — this text was typed by hand on a keyboard, not pasted or generated. The typing rhythm and finger positions are recorded in the seal.
+                    </p>
+                  )}
+                  {hasDeviceVerification && (
+                    <p>
+                      <span className="text-green-400 font-medium">Device verified</span> — Apple confirmed this came from a real, unmodified iPhone running the genuine KeyWitness app.
+                    </p>
+                  )}
+                  {hasFaceId && (
+                    <p>
+                      <span className="text-green-400 font-medium">Face ID confirmed</span> — the person whose face unlocks this phone saw the message and approved it
+                      {attestationDoc?.biometricTimestamp ? ` ${Math.round((attestationDoc.biometricTimestamp - attestationDoc.createdAt) / 1000)} seconds after typing` : ""}.
+                    </p>
+                  )}
+                  {!hasKeystrokeData && !hasDeviceVerification && !hasFaceId && (
+                    <p>The cryptographic signature is valid — the text hasn't been modified since it was signed.</p>
+                  )}
                 </div>
 
                 {/* Trust warnings */}

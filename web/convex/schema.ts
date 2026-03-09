@@ -25,7 +25,8 @@ export default defineSchema({
 
   usernames: defineTable({
     username: v.string(),
-    email: v.string(),
+    /** SHA-256 hash of the recovery email (hex). Never store plaintext. */
+    emailHash: v.string(),
     /** Base64url Ed25519 public keys authorized for this username */
     publicKeys: v.array(v.string()),
     /** Next sequential attestation number */

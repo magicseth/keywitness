@@ -3,7 +3,19 @@ import { v } from "convex/values";
 
 const USERNAME_RE = /^[a-zA-Z][a-zA-Z0-9_-]{2,29}$/;
 
-/** Claim a username, associating it with a public key and recovery email. */
+/** SHA-256 hash a string, return hex. */
+async function sha256Hex(input: string): Promise<string> {
+  const data = new TextEncoder().encode(input);
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Normalize email for consistent hashing: trim + lowercase. */
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+/** Claim a username, associating it with a public key and recovery email hash. */
 export const claim = mutation({
   args: {
     username: v.string(),
@@ -32,9 +44,11 @@ export const claim = mutation({
       throw new Error("Username is already taken.");
     }
 
+    const emailHash = await sha256Hex(normalizeEmail(args.email));
+
     await ctx.db.insert("usernames", {
       username,
-      email: args.email,
+      emailHash,
       publicKeys: [args.publicKey],
       nextSeq: 1,
       createdAt: Date.now(),
@@ -102,6 +116,7 @@ export const resolve = query({
     return { shortId: doc.shortId };
   },
 });
+
 
 /** Allocate the next sequence number for a username. */
 export const allocateSeq = mutation({

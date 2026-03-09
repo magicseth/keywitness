@@ -4,367 +4,323 @@ export default function HowItWorks() {
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-gray-100">
       <Nav />
-      <div className="max-w-3xl mx-auto px-4 py-12">
-        <div className="mb-10">
-          <h1 className="text-3xl font-bold tracking-tight text-white mb-2">
-            How KeyWitness Works
-          </h1>
-          <p className="text-gray-400 text-lg">
-            Cryptographic proof that text was human-typed on a real device.
-          </p>
-        </div>
 
-        <div className="space-y-8">
-          <Section title="The Problem">
-            <p>
-              How do you prove that a piece of text was actually typed by a
-              human, on a specific device, at a specific time? With AI-generated
-              content becoming indistinguishable from human writing, there's no
-              reliable way to verify authorship.
-            </p>
-          </Section>
+      {/* Docco-style two-column layout for the whole page */}
+      <div className="border-b border-gray-800">
 
-          <Section title="The Solution">
-            <p>
-              KeyWitness is a custom iOS keyboard that captures cryptographic
-              proof as you type. Every keystroke is recorded with its timing,
-              touch position, and contact radius. When you're done, the keyboard
-              seals the text with a standards-compliant digital signature and
-              uploads the attestation.
-            </p>
-          </Section>
+        {/* Title row */}
+        <Row
+          left={
+            <>
+              <h1 className="text-3xl font-bold tracking-tight text-white mb-3">
+                How It Works
+              </h1>
+              <p className="text-gray-400 leading-relaxed">
+                You type a message. You tap Seal. The keyboard proves it was
+                you, on your phone, typing with your fingers. Then anyone can
+                check that proof — without trusting us or anyone else.
+              </p>
+            </>
+          }
+        />
 
-          <Section title="How It Works">
-            <Steps
-              steps={[
-                {
-                  num: "1",
-                  title: "You type with the KeyWitness keyboard",
-                  desc: "Each keystroke is recorded with sub-millisecond timing, touch position (x/y), contact radius, and force. This data is unique to the typist — like a fingerprint.",
-                },
-                {
-                  num: "2",
-                  title: "You tap Seal",
-                  desc: "The keyboard builds a W3C Verifiable Credential containing a SHA-256 hash of the text, device ID, timestamp, and keystroke biometrics hash.",
-                },
-                {
-                  num: "3",
-                  title: "Cryptographic signing",
-                  desc: "The credential is signed using eddsa-jcs-2022 (Ed25519 over JCS-canonicalized JSON). The private key is device-bound and never leaves the device.",
-                },
-                {
-                  num: "4",
-                  title: "Apple App Attest",
-                  desc: "The keyboard generates an App Attest assertion proving the attestation came from a genuine Apple device running the real KeyWitness app — not an emulator or modified build.",
-                },
-                {
-                  num: "5",
-                  title: "Client-side encryption",
-                  desc: "The cleartext and keystroke data are encrypted with a random AES-256-GCM key. Only the encrypted form is uploaded. The decryption key lives in the URL fragment (#), which is never sent to the server.",
-                },
-                {
-                  num: "6",
-                  title: "Upload and share",
-                  desc: "The attestation is uploaded and you get a short link like typed.by/you/42 with the decryption key encoded as 27 emoji in the URL fragment. Anyone with the link can verify it entirely in their browser.",
-                },
-              ]}
-            />
-          </Section>
+        {/* 1. Type */}
+        <Row
+          left={
+            <>
+              <h2 className="text-white font-semibold text-lg mb-2">You type normally.</h2>
+              <p>
+                KeyWitness is a keyboard. You install it, switch to it, and type
+                like you always do. While you type, the keyboard quietly records
+                how you type — the rhythm, the pauses between keys, where your
+                finger lands, how hard you press.
+              </p>
+              <p className="mt-3">
+                Nobody types the same way. Your pattern is as unique as your
+                handwriting. That's the signal.
+              </p>
+            </>
+          }
+          right={
+            <>
+              Each keystroke event captures: key-down time, key-up time, x/y
+              touch coordinates, contact radius (finger area), and force. All
+              times are <code>ProcessInfo.systemUptime</code> with
+              sub-millisecond precision. Data stays in memory until you seal or
+              dismiss.
+            </>
+          }
+        />
 
-          <Section title="The Proof Chain">
-            <p>
-              Each attestation contains multiple independent proofs that are verified separately:
-            </p>
-            <div className="space-y-3 mt-3">
-              <ProofItem
-                icon="K"
-                color="blue"
-                title="Keystroke Attestation"
-                desc="Ed25519 signature over the credential using eddsa-jcs-2022. Proves the text hasn't been modified and was signed by the device's key."
-              />
-              <ProofItem
-                icon="D"
-                color="green"
-                title="Device Attestation (App Attest)"
-                desc="Apple's DCAppAttestService proves the assertion came from a real Apple device running the genuine KeyWitness app. Not an emulator, not a modified build."
-              />
-              <ProofItem
-                icon="F"
-                color="purple"
-                title="Biometric Verification (Face ID)"
-                desc="Optional. The device owner confirms the message with Face ID after typing. A separate signature proves the biometric check happened."
-              />
-            </div>
-          </Section>
-
-          <Section title="W3C Verifiable Credentials">
-            <p>
-              KeyWitness v3 attestations use the{" "}
+        {/* 2. Seal */}
+        <Row
+          left={
+            <>
+              <h2 className="text-white font-semibold text-lg mb-2">You tap Seal.</h2>
+              <p>
+                When you're done, you tap the Seal button. The keyboard takes
+                everything — your text, your typing pattern — and locks it into
+                a signed document. It's like a notarized statement: "This text
+                was typed by this device, at this time, with these fingers."
+              </p>
+              <p className="mt-3">
+                The signing key lives inside your phone's secure hardware. It
+                never leaves. Not even we can extract it.
+              </p>
+            </>
+          }
+          right={
+            <>
+              The keyboard builds a{" "}
               <a href="https://www.w3.org/TR/vc-data-model-2.0/" className="text-blue-400 hover:underline" target="_blank" rel="noopener">
-                W3C Verifiable Credentials 2.0
+                W3C Verifiable Credential 2.0
               </a>{" "}
-              data model with the{" "}
-              <a href="https://www.w3.org/TR/vc-di-eddsa/" className="text-blue-400 hover:underline" target="_blank" rel="noopener">
-                eddsa-jcs-2022
+              and signs it with <code>eddsa-jcs-2022</code> (Ed25519 over{" "}
+              <a href="https://www.rfc-editor.org/rfc/rfc8785" className="text-blue-400 hover:underline" target="_blank" rel="noopener">
+                RFC 8785
               </a>{" "}
-              Data Integrity cryptosuite. This means:
-            </p>
-            <ul className="list-disc list-inside space-y-1 ml-1 mt-2">
-              <li>Any VC-compatible verifier can validate attestations independently</li>
-              <li>Issuer identity uses <a href="https://w3c-ccg.github.io/did-method-key/" className="text-blue-400 hover:underline" target="_blank" rel="noopener">did:key</a> with Ed25519 public keys</li>
-              <li>JSON Canonicalization Scheme (JCS / RFC 8785) ensures deterministic signing</li>
-              <li>Proof values are multibase-encoded (z + base58btc)</li>
-            </ul>
-            <p className="mt-3">
-              The credential structure:
-            </p>
-            <pre className="bg-[#111111] border border-gray-800 rounded-lg p-4 text-sm text-gray-300 overflow-x-auto mt-2">
-{`{
-  "@context": [
-    "https://www.w3.org/ns/credentials/v2",
-    "https://keywitness.io/ns/v1"
-  ],
-  "type": ["VerifiableCredential", "KeyWitnessAttestation"],
-  "issuer": "did:key:z6Mk...",
-  "validFrom": "2026-03-09T04:07:41.132Z",
-  "credentialSubject": {
-    "type": "HumanTypedContent",
-    "cleartextHash": "<SHA-256>",
-    "encryptedCleartext": "<AES-256-GCM>",
-    "deviceId": "<UUID>",
-    "keystrokeBiometricsHash": "<SHA-256>",
-    "appVersion": "1.0"
-  },
-  "proof": [
-    { "type": "DataIntegrityProof", "cryptosuite": "eddsa-jcs-2022", ... },
-    { "type": "AppleAppAttestProof", "keyId": "...", "assertionData": "..." }
-  ]
-}`}
-            </pre>
-          </Section>
+              JCS-canonicalized JSON). The issuer is a{" "}
+              <code>did:key</code> — the public key itself, no registry needed.
+              The credential includes SHA-256 hashes of both the cleartext and
+              the keystroke biometrics.
+            </>
+          }
+        />
 
-          <Section title="Emoji Key Encoding">
-            <p>
-              Each attestation's cleartext is encrypted with a random AES-256-GCM key.
-              The key is encoded as <strong>27 human emoji</strong> in the URL fragment
-              (the part after <code className="bg-[#1f2937] px-1.5 py-0.5 rounded text-green-400 text-xs">#</code>),
-              which is never sent to the server.
-            </p>
-            <p className="mt-2">
-              The encoding uses 129 emoji that support Fitzpatrick skin tone modifiers,
-              each with 6 variants (default + 5 skin tones) = 774 symbols.
-              At ~9.6 bits per emoji, 27 emoji encode the full 256-bit key.
-              The emoji survive copy-paste across messaging apps like iMessage, WhatsApp, and Slack.
-            </p>
-            <pre className="bg-[#111111] border border-gray-800 rounded-lg p-4 text-sm text-gray-300 overflow-x-auto mt-2">
-{`https://typed.by/magicseth/42#👵🏽🤳🤰🏾💁🏻🦹🏽✋🏾👂✋🏼🏊👨🏻💁🏽🧓🏼🧜🏼🫸🏽✍🧝🏼🏋🏼🤏🏻🚵🏿🧒🏻🏂🏿🤜🏻🚴🏻🫴🏽🖖🏽✊🏽`}
-            </pre>
-            <p className="mt-2">
-              If the emoji key is stripped (e.g. when a platform doesn't preserve the fragment),
-              the verification page shows the character count and lets recipients paste the
-              original text to verify the SHA-256 hash matches — a fallback that works without
-              the encryption key.
-            </p>
-          </Section>
+        {/* 3. Encrypt */}
+        <Row
+          left={
+            <>
+              <h2 className="text-white font-semibold text-lg mb-2">We can't read what you wrote.</h2>
+              <p>
+                Before anything leaves your phone, the text is encrypted with a
+                random key. That key is never sent to our server. It's encoded
+                as 27 emoji and tucked into the link you share.
+              </p>
+              <p className="mt-3">
+                The server stores an encrypted blob it can't decrypt. We
+                couldn't read your messages even if we wanted to. That's not a
+                policy — it's math.
+              </p>
+            </>
+          }
+          right={
+            <>
+              AES-256-GCM with a random 256-bit key. The key is placed in the
+              URL fragment (<code>#</code>), which browsers never send to
+              servers per RFC 3986. The key is encoded as 27 emoji using a
+              base-774 alphabet (129 Emoji_Modifier_Base × 6 Fitzpatrick skin
+              tones). Example:{" "}
+              <span className="break-all">typed.by/you/42#👵🏽🤳🤰🏾💁🏻🦹🏽✋🏾👂✋🏼🏊</span>
+            </>
+          }
+        />
 
-          <Section title="Usernames & Short Links">
-            <p>
-              Claim a username in the app to get short, human-readable attestation links.
-              Instead of <code className="bg-[#1f2937] px-1.5 py-0.5 rounded text-green-400 text-xs">keywitness.io/v/aBcDeFg123</code>,
-              your seals link to:
-            </p>
-            <pre className="bg-[#111111] border border-gray-800 rounded-lg p-4 text-sm text-gray-300 overflow-x-auto mt-2">
-{`typed.by/magicseth/1
-typed.by/magicseth/2
-typed.by/magicseth/3`}
-            </pre>
-            <p className="mt-2">
-              Usernames are bound to your device's Ed25519 public key — no password, no
-              login. You provide a recovery email during registration, used only if you
-              lose access to all your devices. Multiple devices can be authorized under
-              the same username via key rotation.
-            </p>
-          </Section>
+        {/* 4. Real device */}
+        <Row
+          left={
+            <>
+              <h2 className="text-white font-semibold text-lg mb-2">It was a real iPhone.</h2>
+              <p>
+                Your iPhone has a chip that Apple locked down at the factory.
+                When KeyWitness installs, Apple certifies that this is a real,
+                unmodified phone running the real app — not a computer
+                pretending to be one.
+              </p>
+              <p className="mt-3">
+                So when someone sees "device verified" on your seal, it means
+                Apple vouched for the hardware.
+              </p>
+            </>
+          }
+          right={
+            <>
+              Apple's{" "}
+              <code>DCAppAttestService</code> generates a P-256 ECDSA key pair
+              in the Secure Enclave. The attestation is a CBOR-encoded
+              certificate chain rooted at Apple's App Attest CA. At
+              registration, the server links the App Attest credential to the
+              keyboard's Ed25519 signing key. Subsequent verification is a
+              credential existence check — no per-request assertion needed.
+            </>
+          }
+        />
 
-          <Section title="Paste to Verify">
-            <p>
-              When the encryption key isn't available (the link was shared without the
-              emoji fragment), the verification page shows that text was sealed but can't
-              decrypt it. Recipients can paste the original text to verify it matches:
-            </p>
-            <ul className="list-disc list-inside space-y-1 ml-1 mt-2">
-              <li>The page shows how many characters were typed</li>
-              <li>The recipient pastes the text they received alongside the link</li>
-              <li>The SHA-256 hash of the pasted text is compared to the attestation's <code className="bg-[#1f2937] px-1.5 py-0.5 rounded text-green-400 text-xs">cleartextHash</code></li>
-              <li>A match proves the pasted text is exactly what was sealed — no modification</li>
-            </ul>
-            <p className="mt-2">
-              The seal URL itself is automatically stripped from the pasted text before
-              hashing, so copy-pasting the full message (including the link) works correctly.
-            </p>
-          </Section>
+        {/* 5. Same person */}
+        <Row
+          left={
+            <>
+              <h2 className="text-white font-semibold text-lg mb-2">It was the same person as before.</h2>
+              <p>
+                Every message you seal is signed with the same key — your
+                device's unique identity. If someone trusted a previous seal
+                from you, they know this one came from the same phone.
+              </p>
+              <p className="mt-3">
+                Claim a username and your seals get short, memorable links:{" "}
+                <code className="text-green-400">typed.by/magicseth/1</code>,{" "}
+                <code className="text-green-400">typed.by/magicseth/2</code>,
+                and so on.
+              </p>
+            </>
+          }
+          right={
+            <>
+              The Ed25519 public key is encoded as a self-resolving{" "}
+              <code>did:key:z6Mk...</code> (multicodec <code>0xed01</code> +
+              base58btc). Usernames are bound to the public key — first come,
+              first served, no password. A recovery email is stored for key
+              loss. Multiple devices can rotate keys under one username.
+            </>
+          }
+        />
 
-          <Section title="Zero-Knowledge Server">
-            <p>
-              The server stores only the encrypted attestation. It never sees:
-            </p>
-            <ul className="list-disc list-inside space-y-1 ml-1 mt-2">
-              <li>The original text (only the AES-encrypted form)</li>
-              <li>The decryption key (it stays in the URL fragment)</li>
-              <li>The private signing key (it never leaves the device)</li>
-            </ul>
-            <p className="mt-3">
-              Verification happens entirely in the browser using the Web Crypto
-              API and tweetnacl. No data is sent back to any server during
-              verification.
-            </p>
-          </Section>
+        {/* 6. Face ID */}
+        <Row
+          left={
+            <>
+              <h2 className="text-white font-semibold text-lg mb-2">The owner of the phone said yes.</h2>
+              <p>
+                After you seal a message, your phone asks you to confirm with
+                Face ID. This is optional but powerful: it proves the person
+                whose face unlocks the phone saw this exact message and approved
+                it.
+              </p>
+              <p className="mt-3">
+                Not just the device. The person.
+              </p>
+            </>
+          }
+          right={
+            <>
+              Face ID via <code>LocalAuthentication</code> (LAContext). On
+              success, the app signs <code>shortId + cleartextHash</code> with
+              the same Ed25519 key and uploads via PATCH. The server verifies
+              the signer matches the original attestation signer — a different
+              key cannot claim someone else's biometric.
+            </>
+          }
+        />
 
-          <Section title="Keystroke Biometrics">
-            <p>
-              Each keystroke captures timing and touch data that creates a
-              unique typing fingerprint:
-            </p>
-            <ul className="list-disc list-inside space-y-1 ml-1 mt-2">
-              <li>
-                <strong>Timing</strong> — key-down and key-up timestamps
-                (sub-millisecond), dwell time, inter-key gaps
-              </li>
-              <li>
-                <strong>Touch position</strong> — x/y coordinates within
-                each key (nobody hits dead center every time)
-              </li>
-              <li>
-                <strong>Contact radius</strong> — finger contact area
-                varies between people and between keystrokes
-              </li>
-              <li>
-                <strong>Force</strong> — how firmly each key is pressed
-              </li>
-            </ul>
-            <p className="mt-3">
-              This data is encrypted alongside the cleartext and visualized on
-              the verification page as a typing pattern timeline and touch map.
-            </p>
-          </Section>
+        {/* 7. Verify */}
+        <Row
+          left={
+            <>
+              <h2 className="text-white font-semibold text-lg mb-2">Anyone can check. No trust required.</h2>
+              <p>
+                Click the link. Your browser does the math. It checks every
+                signature, every hash, every proof — right there on your
+                machine. No server call. No API key. No account.
+              </p>
+              <p className="mt-3">
+                If KeyWitness disappeared tomorrow, every seal we ever issued
+                would still verify. That's the whole point.
+              </p>
+            </>
+          }
+          right={
+            <>
+              Client-side verification uses <code>tweetnacl</code> for Ed25519
+              and Web Crypto for SHA-256 / AES-256-GCM. The{" "}
+              <code>did:key</code> is decoded to get the raw public key. JCS
+              canonicalization is re-applied, the signature is verified, and{" "}
+              <code>cleartextHash</code> is compared. If the emoji fragment is
+              present, AES-GCM decrypts the cleartext and keystroke data.
+            </>
+          }
+        />
 
-          <Section title="Trust Model">
-            <div>
-              <h4 className="text-gray-300 font-medium mb-1">It proves:</h4>
-              <ul className="list-disc list-inside space-y-1 ml-1">
-                <li>Text was typed on a device with the given signing key</li>
-                <li>Text hasn't been modified since signing</li>
-                <li>The attestation was created at the stated time</li>
-                <li>If device-verified: it came from the real KeyWitness app on a genuine Apple device</li>
-                <li>If Face ID confirmed: the device owner personally verified the message</li>
-                <li>Keystroke patterns are consistent with human typing</li>
-              </ul>
-            </div>
-            <div className="mt-3">
-              <h4 className="text-gray-300 font-medium mb-1">
-                It does not prove:
-              </h4>
-              <ul className="list-disc list-inside space-y-1 ml-1">
-                <li>The identity of the typist (only the device)</li>
-                <li>That the text was typed voluntarily</li>
-                <li>That someone didn't dictate the text to the typist</li>
-              </ul>
-            </div>
-          </Section>
+        {/* What it doesn't prove */}
+        <Row
+          left={
+            <>
+              <h2 className="text-white font-semibold text-lg mb-2">What this doesn't prove.</h2>
+              <p>
+                KeyWitness proves the text was typed by a human on a specific
+                device. It does not prove who that human is (only that it's the
+                same device each time), that they typed voluntarily, or that
+                nobody told them what to type.
+              </p>
+              <p className="mt-3">
+                It's proof of authorship, not proof of intent.
+              </p>
+            </>
+          }
+          right={
+            <>
+              The credential proves: device identity (signing key), device
+              authenticity (App Attest), content integrity (SHA-256), temporal
+              ordering (timestamps), human input patterns (biometrics hash),
+              and optionally owner confirmation (Face ID). It does not prove
+              identity beyond the device, voluntariness, or originality of
+              thought.
+            </>
+          }
+        />
 
-          <Section title="Open Protocol">
-            <p>
-              The attestation format is based on open W3C standards. Any Ed25519
-              implementation can verify signatures. The JSON-LD context is published
-              at{" "}
+        {/* Open standard */}
+        <Row
+          left={
+            <>
+              <h2 className="text-white font-semibold text-lg mb-2">It's all open standards.</h2>
+              <p>
+                Everything we use — the credential format, the signatures, the
+                identifiers — is a published standard anyone can implement. An
+                Android keyboard, a desktop app, or a hardware token could
+                produce seals that our verifier accepts, and vice versa.
+              </p>
+              <p className="mt-3">
+                Read the{" "}
+                <a href="/manifesto" className="text-blue-400 hover:underline">Humanifesto</a>{" "}
+                for how to build your own, or check the{" "}
+                <a href="/developers" className="text-blue-400 hover:underline">developer docs</a>{" "}
+                to integrate verification.
+              </p>
+            </>
+          }
+          right={
+            <>
+              W3C Verifiable Credentials 2.0, eddsa-jcs-2022 (Ed25519 + JCS),
+              did:key identifiers, BitstringStatusList for revocation. JSON-LD
+              context published at{" "}
               <a href="/ns/v1" className="text-blue-400 hover:underline">keywitness.io/ns/v1</a>.
-              Provider capabilities are listed at{" "}
+              Provider capabilities at{" "}
               <a href="/.well-known/keywitness-providers.json" className="text-blue-400 hover:underline">
                 .well-known/keywitness-providers.json
               </a>.
-            </p>
-            <p className="mt-2">
-              Want to integrate KeyWitness verification into your app?
-              Check the{" "}
-              <a href="/developers" className="text-blue-400 hover:underline">
-                Developer docs
-              </a>.
-            </p>
-          </Section>
+            </>
+          }
+        />
+      </div>
+
+      <footer className="text-center text-gray-600 text-xs py-8">
+        <a href="/" className="hover:text-gray-400 transition-colors">
+          keywitness.io
+        </a>
+      </footer>
+    </div>
+  );
+}
+
+function Row({
+  left,
+  right,
+}: {
+  left: React.ReactNode;
+  right?: React.ReactNode;
+}) {
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 border-t border-gray-800">
+      <div className="px-6 py-8 lg:pr-10 text-[15px] text-gray-400 leading-relaxed">
+        {left}
+      </div>
+      {right ? (
+        <div className="bg-[#111113] px-6 py-8 lg:border-l border-t lg:border-t-0 border-gray-800 text-xs text-gray-500 leading-relaxed font-mono">
+          {right}
         </div>
-
-        <footer className="text-center text-gray-600 text-xs py-8 mt-10 border-t border-gray-800">
-          <a href="/" className="hover:text-gray-400 transition-colors">
-            keywitness.io
-          </a>
-        </footer>
-      </div>
-    </div>
-  );
-}
-
-function ProofItem({
-  icon,
-  color,
-  title,
-  desc,
-}: {
-  icon: string;
-  color: string;
-  title: string;
-  desc: string;
-}) {
-  const colors: Record<string, string> = {
-    blue: "bg-blue-900/50 text-blue-400 border-blue-800",
-    green: "bg-green-900/50 text-green-400 border-green-800",
-    purple: "bg-purple-900/50 text-purple-400 border-purple-800",
-  };
-  return (
-    <div className="flex gap-3">
-      <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold border shrink-0 ${colors[color]}`}>
-        {icon}
-      </div>
-      <div>
-        <div className="text-gray-200 font-medium text-sm">{title}</div>
-        <div className="text-gray-500 text-sm mt-0.5">{desc}</div>
-      </div>
-    </div>
-  );
-}
-
-function Section({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="border border-gray-800 rounded-lg p-6">
-      <h2 className="text-lg font-semibold text-white mb-3">{title}</h2>
-      <div className="text-sm text-gray-400 space-y-2">{children}</div>
-    </div>
-  );
-}
-
-function Steps({
-  steps,
-}: {
-  steps: Array<{ num: string; title: string; desc: string }>;
-}) {
-  return (
-    <div className="space-y-4">
-      {steps.map((step) => (
-        <div key={step.num} className="flex gap-4">
-          <div className="shrink-0 w-7 h-7 rounded-full bg-blue-600/20 text-blue-400 flex items-center justify-center text-sm font-bold">
-            {step.num}
-          </div>
-          <div>
-            <div className="text-gray-200 font-medium">{step.title}</div>
-            <div className="text-gray-500 text-sm mt-0.5">{step.desc}</div>
-          </div>
-        </div>
-      ))}
+      ) : (
+        <div className="hidden lg:block bg-[#111113] lg:border-l border-gray-800" />
+      )}
     </div>
   );
 }
