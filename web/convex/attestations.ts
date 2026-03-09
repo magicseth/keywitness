@@ -123,6 +123,7 @@ export const getByShortId = query({
       biometricTimestamp: doc.biometricTimestamp,
       deviceVerified: doc.deviceVerified,
       statusIndex: doc.statusIndex,
+      username: doc.username,
     };
   },
 });

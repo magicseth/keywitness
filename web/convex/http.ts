@@ -1,5 +1,6 @@
 import { httpRouter } from "convex/server";
-import { registerStaticRoutes } from "@convex-dev/self-hosting";
+// registerStaticRoutes replaced by custom catch-all handler (see bottom of file)
+// to support per-attestation OG tags for bots on vanity URLs.
 import { components, internal } from "./_generated/api";
 import { httpAction } from "./_generated/server";
 import { api } from "./_generated/api";
@@ -1202,18 +1203,171 @@ function buildBadgeHTML(shortId: string, style: string, theme: string, origin: s
 </html>`;
 }
 
-// ── OpenGraph Bot Detection for /v/ URLs ─────────────────────────────────────
+// ── OpenGraph Bot Detection ──────────────────────────────────────────────────
 //
-// NOTE: We do NOT use pathPrefix "/v/" here because it would steal all /v/ requests
-// from the static hosting SPA fallback. Instead, the OG meta tags are in index.html
-// for generic social previews. For per-attestation OG previews, bots can use the
-// oEmbed endpoint: GET /api/oembed?url=https://keywitness.io/v/{shortId}
+// Bots (iMessage, Slack, Twitter, Discord, Facebook, etc.) get a minimal HTML
+// page with per-attestation OG tags. Real browsers get the SPA via index.html.
+
+const OG_BOT_RE = /bot|crawl|spider|slurp|facebookexternalhit|Facebot|Twitterbot|LinkedInBot|Slackbot|Discordbot|WhatsApp|TelegramBot|Applebot|iMessage|Pinterestbot|Embedly|Quora|Outbrain|vkShare|Google-AMPHTML|Bing|DuckDuckBot|Baiduspider|Yandex|Sogou|preview/i;
+
+function isBot(userAgent: string | null): boolean {
+  if (!userAgent) return false;
+  return OG_BOT_RE.test(userAgent);
+}
+
+/** Serve index.html from Convex storage (SPA fallback for real browsers). */
+async function serveSPA(ctx: { runQuery: Function; storage: { get: Function } }): Promise<Response> {
+  const asset = await ctx.runQuery(components.selfHosting.lib.getByPath, { path: "/index.html" });
+  if (!asset?.storageId) {
+    return new Response("Not Found", { status: 404 });
+  }
+  const blob = await ctx.storage.get(asset.storageId);
+  if (!blob) {
+    return new Response("Storage error", { status: 500 });
+  }
+  return new Response(blob, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "public, max-age=0, must-revalidate",
+    },
+  });
+}
+
+function buildOGPage(opts: {
+  title: string;
+  description: string;
+  url: string;
+  image?: string;
+}): string {
+  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta property="og:site_name" content="KeyWitness">
+<meta property="og:title" content="${esc(opts.title)}">
+<meta property="og:description" content="${esc(opts.description)}">
+<meta property="og:url" content="${esc(opts.url)}">
+<meta property="og:type" content="article">
+${opts.image ? `<meta property="og:image" content="${esc(opts.image)}">` : ""}
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="${esc(opts.title)}">
+<meta name="twitter:description" content="${esc(opts.description)}">
+<title>${esc(opts.title)}</title>
+</head>
+<body>
+<p>Redirecting...</p>
+<script>window.location.replace("${esc(opts.url)}");</script>
+</body>
+</html>`;
+}
+
+
+// ── Static files + vanity URL OG catch-all ───────────────────────────────────
 //
-// The SPA fallback in @convex-dev/self-hosting serves index.html for all unmatched
-// routes, which is what makes /v/{shortId} work for real browsers.
+// We replace registerStaticRoutes with a custom catch-all so we can inject
+// per-attestation OG tags for vanity URLs (/{username}/{seq}) when bots request
+// them. Static file serving logic mirrors @convex-dev/self-hosting behavior.
 
-// ── Serve static files last ──────────────────────────────────────────────────
+function hasFileExtension(path: string): boolean {
+  const lastSegment = path.split("/").pop() || "";
+  return lastSegment.includes(".") && !lastSegment.startsWith(".");
+}
 
-registerStaticRoutes(http, components.selfHosting);
+function isHashedAsset(path: string): boolean {
+  // Vite hashed assets: /assets/index-abc123.js
+  return /\/assets\/.*-[a-f0-9]{8,}\.\w+$/.test(path);
+}
+
+http.route({
+  pathPrefix: "/",
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    const url = new URL(request.url);
+    let path = url.pathname;
+
+    // Normalize root
+    if (path === "" || path === "/") {
+      path = "/index.html";
+    }
+
+    // 1. Try to serve a static file
+    const asset: any = await ctx.runQuery(components.selfHosting.lib.getByPath, { path });
+    if (asset?.storageId) {
+      const etag = `"${asset.storageId}"`;
+      const ifNoneMatch = request.headers.get("If-None-Match");
+      if (ifNoneMatch === etag) {
+        return new Response(null, {
+          status: 304,
+          headers: {
+            ETag: etag,
+            "Cache-Control": isHashedAsset(path)
+              ? "public, max-age=31536000, immutable"
+              : "public, max-age=0, must-revalidate",
+          },
+        });
+      }
+      const blob = await ctx.storage.get(asset.storageId);
+      if (blob) {
+        return new Response(blob, {
+          status: 200,
+          headers: {
+            "Content-Type": asset.contentType,
+            "Cache-Control": isHashedAsset(path)
+              ? "public, max-age=31536000, immutable"
+              : "public, max-age=0, must-revalidate",
+            ETag: etag,
+            "X-Content-Type-Options": "nosniff",
+          },
+        });
+      }
+    }
+
+    // 2. If path has a file extension and wasn't found, 404
+    if (hasFileExtension(path)) {
+      return new Response("Not Found", { status: 404, headers: { "Content-Type": "text/plain" } });
+    }
+
+    // 3. SPA paths — check for bot + vanity/shortId pattern before falling back
+    const ua = request.headers.get("User-Agent");
+    if (isBot(ua)) {
+      // /v/{shortId}
+      const shortIdMatch = url.pathname.match(/^\/v\/([a-zA-Z0-9]+)\/?$/);
+      if (shortIdMatch) {
+        const shortId = shortIdMatch[1];
+        const doc = await ctx.runQuery(api.attestations.getByShortId, { shortId });
+        const title = doc?.username
+          ? `${doc.username} typed this — tap to verify`
+          : "Someone typed this — tap to verify";
+        return new Response(buildOGPage({
+          title,
+          description: "Cryptographic proof from a real iPhone. Verified by KeyWitness.",
+          url: `${url.origin}/v/${shortId}`,
+        }), {
+          status: 200,
+          headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=300" },
+        });
+      }
+
+      // /{username}/{seq}
+      const vanityMatch = url.pathname.match(/^\/([a-zA-Z][a-zA-Z0-9_-]{2,29})\/(\d+)\/?$/);
+      if (vanityMatch) {
+        const username = vanityMatch[1].toLowerCase();
+        return new Response(buildOGPage({
+          title: `${username} typed this — tap to verify`,
+          description: "Cryptographic proof from a real iPhone. Verified by KeyWitness.",
+          url: `${url.origin}/${username}/${vanityMatch[2]}`,
+        }), {
+          status: 200,
+          headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=300" },
+        });
+      }
+    }
+
+    // 4. SPA fallback — serve index.html
+    return serveSPA(ctx as any);
+  }),
+});
 
 export default http;
