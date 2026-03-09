@@ -374,11 +374,13 @@ class KeyWitnessKeyboard: UIInputViewController {
                     appAttestKeyId = AppAttestHelper.shared.keyId
                 }
 
-                let (attestationBlock, encryptionKey) = try AttestationBuilder.createAttestation(
+                let (attestationBlock, encryptionKey) = try AttestationBuilder.createV3Attestation(
                     cleartext: cleartext,
                     keystrokeEvents: events,
                     faceIdVerified: false,
-                    appAttestToken: appAttestToken
+                    appAttestKeyId: appAttestKeyId,
+                    appAttestAssertion: appAttestAssertion,
+                    appAttestClientData: appAttestClientData
                 )
 
                 self.uploadAttestation(attestationBlock, encryptionKey: encryptionKey, appAttestKeyId: appAttestKeyId, appAttestAssertion: appAttestAssertion, appAttestClientData: appAttestClientData) { [weak self] result in
