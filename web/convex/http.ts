@@ -1030,74 +1030,14 @@ function buildBadgeHTML(shortId: string, style: string, theme: string, origin: s
 }
 
 // ── OpenGraph Bot Detection for /v/ URLs ─────────────────────────────────────
-
-const BOT_UA = /Slackbot|Twitterbot|facebookexternalhit|Discordbot|LinkedInBot|WhatsApp|TelegramBot|Googlebot|bingbot|Embedly|Quora|outbrain|pinterest|applebot|redditbot|Iframely|Rogerbot/i;
-
-http.route({
-  pathPrefix: "/v/",
-  method: "GET",
-  handler: httpAction(async (ctx, request) => {
-    const ua = request.headers.get("User-Agent") || "";
-    const url = new URL(request.url);
-    const shortId = url.pathname.replace("/v/", "").split("/")[0];
-
-    // For real browsers, serve the SPA (let the static hosting handle it)
-    if (!BOT_UA.test(ua)) {
-      // Fetch index.html from our own static hosting
-      const spaResp = await fetch(`${url.origin}/index.html`);
-      if (spaResp.ok) {
-        const html = await spaResp.text();
-        return new Response(html, {
-          headers: {
-            "Content-Type": "text/html; charset=utf-8",
-            "Cache-Control": "no-cache",
-          },
-        });
-      }
-      // Fallback: redirect
-      return new Response(null, {
-        status: 302,
-        headers: { Location: `${url.origin}/?a=${shortId}${url.hash || ""}` },
-      });
-    }
-
-    // For bots, serve rich OG meta tags
-    const doc = shortId ? await ctx.runQuery(api.attestations.getByShortId, { shortId }) : null;
-    const verified = !!doc;
-    const title = verified ? "KeyWitness Verified - Human Typed Content" : "KeyWitness - Verify Attestation";
-    const description = verified
-      ? "This content was cryptographically verified as typed by a real person on a real device."
-      : "Verify if this content was typed by a real person using KeyWitness.";
-
-    const ogHtml = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta property="og:title" content="${title}" />
-<meta property="og:description" content="${description}" />
-<meta property="og:image" content="${url.origin}/og-card.svg" />
-<meta property="og:url" content="${url.href}" />
-<meta property="og:type" content="website" />
-<meta property="og:site_name" content="KeyWitness" />
-<meta name="twitter:card" content="summary" />
-<meta name="twitter:title" content="${title}" />
-<meta name="twitter:description" content="${description}" />
-<meta name="twitter:image" content="${url.origin}/og-card.svg" />
-<link rel="alternate" type="application/json+oembed" href="${url.origin}/api/oembed?url=${encodeURIComponent(url.href)}" title="KeyWitness" />
-<title>${title}</title>
-</head>
-<body><p>${description}</p><p><a href="${url.href}">View on KeyWitness</a></p></body>
-</html>`;
-
-    return new Response(ogHtml, {
-      status: 200,
-      headers: {
-        "Content-Type": "text/html; charset=utf-8",
-        "Cache-Control": "public, max-age=3600",
-      },
-    });
-  }),
-});
+//
+// NOTE: We do NOT use pathPrefix "/v/" here because it would steal all /v/ requests
+// from the static hosting SPA fallback. Instead, the OG meta tags are in index.html
+// for generic social previews. For per-attestation OG previews, bots can use the
+// oEmbed endpoint: GET /api/oembed?url=https://keywitness.io/v/{shortId}
+//
+// The SPA fallback in @convex-dev/self-hosting serves index.html for all unmatched
+// routes, which is what makes /v/{shortId} work for real browsers.
 
 // ── Serve static files last ──────────────────────────────────────────────────
 
