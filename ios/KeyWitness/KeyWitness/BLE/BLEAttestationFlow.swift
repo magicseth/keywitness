@@ -19,22 +19,49 @@ final class BLEAttestationFlow {
         }
     }
 
+    /// Reconstruct what the user actually typed by replaying BLE keystroke events.
+    private func reconstructText(from events: [BLEKeystrokeEvent]) -> String {
+        var chars: [String] = []
+        for event in events {
+            if event.key == "backspace" {
+                if !chars.isEmpty { chars.removeLast() }
+            } else if event.key == "space" {
+                chars.append(" ")
+            } else if event.key == "newline" {
+                chars.append("\n")
+            } else {
+                chars.append(event.key)
+            }
+        }
+        return chars.joined()
+    }
+
     private func showConfirmation(session: BLESession, cleartext: String) {
         guard let vc = viewController else {
             sendError(session: session, error: "No view controller")
             return
         }
 
+        // Reconstruct text from BLE keystrokes — this is what the user actually typed,
+        // NOT what the browser claims. The user must confirm these match.
+        let reconstructed = reconstructText(from: session.keystrokeEvents)
+
         let preview: String
-        if cleartext.count > 500 {
-            preview = String(cleartext.prefix(500)) + "..."
+        if reconstructed.count > 500 {
+            preview = String(reconstructed.prefix(500)) + "..."
         } else {
-            preview = cleartext
+            preview = reconstructed
         }
 
+        // Check if the browser's cleartext matches the reconstructed keystrokes
+        let matches = cleartext.trimmingCharacters(in: .whitespaces) == reconstructed.trimmingCharacters(in: .whitespaces)
+
+        let title = matches ? "Confirm Web Attestation" : "⚠️ Text Mismatch"
+        let mismatchWarning = matches ? "" : "\n\n⚠️ The browser sent different text than what your keystrokes produced. Only confirm if this looks correct."
+
         let alert = UIAlertController(
-            title: "Confirm Web Attestation",
-            message: "A web browser wants to attest that you typed:\n\n\"\(preview)\"\n\n\(session.keystrokeEvents.count) keystrokes recorded over BLE.",
+            title: title,
+            message: "Your keystrokes produced:\n\n\"\(preview)\"\n\n\(session.keystrokeEvents.count) keystrokes recorded over BLE.\(mismatchWarning)",
             preferredStyle: .alert
         )
 
