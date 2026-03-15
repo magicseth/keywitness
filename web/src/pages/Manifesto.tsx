@@ -10,7 +10,7 @@ export default function Manifesto() {
             The Humanifesto
           </h1>
           <p className="text-gray-400 text-lg leading-relaxed">
-            On proving human authorship in the age of AI.
+            On proving human input in the age of AI.
           </p>
         </div>
 
@@ -146,7 +146,7 @@ export default function Manifesto() {
             </p>
             <ul className="list-disc list-inside space-y-2 ml-1 mt-3">
               <li>
-                <strong>They're human.</strong> KeyWitness proves human authorship.
+                <strong>They're human.</strong> KeyWitness proves human input.
                 The key that protects the message is literally composed of people —
                 hands waving, people dancing, fingers pointing. The encoding is
                 the message.

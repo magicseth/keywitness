@@ -242,7 +242,7 @@ export default function HowItWorks() {
                 nobody told them what to type.
               </p>
               <p className="mt-3">
-                It's proof of authorship, not proof of intent.
+                It's proof of human input, not proof of identity or intent.
               </p>
             </>
           }

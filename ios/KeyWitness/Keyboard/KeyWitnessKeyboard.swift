@@ -226,7 +226,11 @@ class KeyWitnessKeyboard: KeyboardInputViewController {
                 let sessionClientData = defaults?.string(forKey: "appAttestSessionClientData")
 
                 let sessionValid = sessionAssertion != nil
-                NSLog("[KeyWitness] Session token valid: %d", sessionValid ? 1 : 0)
+                // Get the attestation object from main app or keyboard for independent verification
+                let mainAttestObj = defaults?.string(forKey: "appAttestAttestationObject")
+                let keyboardAttestObj = defaults?.string(forKey: "keyboardAppAttestAttestationObject")
+                let attestObj = mainAttestObj ?? keyboardAttestObj
+                NSLog("[KeyWitness] Session token valid: %d, attestObj: %d bytes", sessionValid ? 1 : 0, attestObj?.count ?? 0)
 
                 let (attestationBlock, encryptionKey) = try AttestationBuilder.createV3Attestation(
                     cleartext: cleartext,
@@ -234,7 +238,8 @@ class KeyWitnessKeyboard: KeyboardInputViewController {
                     faceIdVerified: false,
                     appAttestKeyId: sessionValid ? sessionKeyId : nil,
                     appAttestAssertion: sessionValid ? sessionAssertion : nil,
-                    appAttestClientData: sessionValid ? sessionClientData : nil
+                    appAttestClientData: sessionValid ? sessionClientData : nil,
+                    appAttestObject: sessionValid ? attestObj : nil
                 )
                 NSLog("[KeyWitness] v3 attestation built successfully")
 
@@ -434,7 +439,8 @@ class KeyWitnessKeyboard: KeyboardInputViewController {
                 if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                    let attestationURL = json["url"] as? String,
                    let shortId = json["id"] as? String {
-                    let fragment = EmojiKey.encode(encryptionKey) ?? encryptionKey
+                    let useEmoji = UserDefaults(suiteName: "group.io.keywitness")?.bool(forKey: "useEmojiLinks") ?? false
+                    let fragment = useEmoji ? (EmojiKey.encode(encryptionKey) ?? encryptionKey) : encryptionKey
                     completion(.success((attestationURL + "#" + fragment, shortId)))
                 } else {
                     completion(.failure(UploadError.unexpectedResponse))
@@ -472,6 +478,13 @@ class KeyWitnessActionHandler: KeyboardAction.StandardActionHandler {
         _ gesture: Keyboard.Gesture,
         on action: KeyboardAction
     ) {
+        // Disable long-press repeat for backspace — it fires .repeatPress events
+        // that can desync keystroke recording from the actual text state.
+        // Users must tap backspace individually for each deletion.
+        if gesture == .repeatPress && action == .backspace {
+            return
+        }
+
         // Record keystrokes for biometrics on release
         if gesture == .release {
             switch action {

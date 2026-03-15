@@ -137,6 +137,8 @@ export const getByShortId = query({
     return {
       attestation,
       attestationUrl,
+      cleartext: doc.cleartext,
+      publicEncryptionKey: doc.publicEncryptionKey,
       createdAt: doc.createdAt,
       biometricSignature: doc.biometricSignature,
       biometricPublicKey: doc.biometricPublicKey,
@@ -145,6 +147,26 @@ export const getByShortId = query({
       statusIndex: doc.statusIndex,
       username: doc.username,
     };
+  },
+});
+
+/** Mark an attestation as public by storing the encryption key.
+ *  This allows anyone to decrypt the cleartext and see keystroke attribution. */
+export const makePublic = mutation({
+  args: {
+    shortId: v.string(),
+    encryptionKey: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const doc = await ctx.db
+      .query("attestations")
+      .withIndex("by_shortId", (q) => q.eq("shortId", args.shortId))
+      .first();
+    if (!doc) throw new Error("Attestation not found");
+    if (doc.publicEncryptionKey) return { success: true, alreadyPublic: true };
+
+    await ctx.db.patch(doc._id, { publicEncryptionKey: args.encryptionKey });
+    return { success: true, alreadyPublic: false };
   },
 });
 
@@ -209,6 +231,22 @@ export const markDeviceVerified = internalMutation({
 });
 
 // ── Base64url helper ─────────────────────────────────────────────────────────
+
+/** One-off migration: clear stored cleartext from attestations (replaced by publicEncryptionKey). */
+export const migrateClearCleartext = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const docs = await ctx.db.query("attestations").collect();
+    let cleared = 0;
+    for (const doc of docs) {
+      if (doc.cleartext) {
+        await ctx.db.patch(doc._id, { cleartext: undefined });
+        cleared++;
+      }
+    }
+    return { cleared };
+  },
+});
 
 function base64urlDecodeAttest(input: string): Uint8Array {
   let base64 = input.replace(/-/g, "+").replace(/_/g, "/");

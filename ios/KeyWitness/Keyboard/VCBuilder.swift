@@ -20,6 +20,7 @@ final class VCBuilder {
                          appAttestKeyId: String? = nil,
                          appAttestAssertion: String? = nil,
                          appAttestClientData: String? = nil,
+                         appAttestObject: String? = nil,
                          challenge: String? = nil) throws -> (block: String, encryptionKey: String) {
 
         let deviceId = AttestationBuilder.deviceIdentifier()
@@ -118,6 +119,12 @@ final class VCBuilder {
             }
             if let clientData = appAttestClientData {
                 appAttestProof["clientData"] = clientData
+            }
+            // Include the attestation object (CBOR with X.509 cert chain) for independent verification.
+            // This allows any verifier to verify the device proof without trusting the KeyWitness server —
+            // only Apple's root CA is needed.
+            if let attestObj = appAttestObject {
+                appAttestProof["attestationObject"] = attestObj
             }
             proofs.append(appAttestProof)
         }

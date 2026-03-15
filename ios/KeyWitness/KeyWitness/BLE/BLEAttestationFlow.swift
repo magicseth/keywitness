@@ -104,6 +104,7 @@ final class BLEAttestationFlow {
                     appAttestKeyId: appAttestKeyId,
                     appAttestAssertion: appAttestAssertion,
                     appAttestClientData: appAttestClientData,
+                    appAttestObject: AppAttestManager.shared.attestationObject,
                     challenge: challengeString
                 )
 

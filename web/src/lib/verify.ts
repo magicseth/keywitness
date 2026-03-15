@@ -262,6 +262,7 @@ function parseAttestationBlock(raw: string): Record<string, unknown> {
 async function verifyV3(
   vc: KeyWitnessVC,
   encryptionKey?: string,
+  manualCleartext?: string,
 ): Promise<VerificationResult> {
   const vcResult: VCVerificationResult = await verifyVC(vc);
 
@@ -287,10 +288,30 @@ async function verifyV3(
         cleartext = decryptedCleartext;
         keystrokeTimings = inner.keystrokeTimings;  // undefined for voice
       } else {
-        decryptionFailed = true;
+        // Trailing space can be lost during copy-paste — try with/without it
+        const trimmed = decryptedCleartext.endsWith(" ") ? decryptedCleartext.slice(0, -1) : decryptedCleartext + " ";
+        const altHash = await sha256Base64url(new TextEncoder().encode(trimmed));
+        if (altHash === vc.credentialSubject.cleartextHash) {
+          cleartext = trimmed;
+          keystrokeTimings = inner.keystrokeTimings;
+        } else {
+          decryptionFailed = true;
+        }
       }
     } catch {
       decryptionFailed = true;
+    }
+  } else if (manualCleartext && vc.credentialSubject.cleartextHash) {
+    // Public cleartext from DB — verify hash match
+    const hash = await sha256Base64url(new TextEncoder().encode(manualCleartext));
+    if (hash === vc.credentialSubject.cleartextHash) {
+      cleartext = manualCleartext;
+    } else {
+      const trimmed = manualCleartext.endsWith(" ") ? manualCleartext.slice(0, -1) : manualCleartext + " ";
+      const altHash = await sha256Base64url(new TextEncoder().encode(trimmed));
+      if (altHash === vc.credentialSubject.cleartextHash) {
+        cleartext = trimmed;
+      }
     }
   }
 
@@ -408,7 +429,14 @@ async function verifyLegacy(
           cleartext = decryptedCleartext;
           keystrokeTimings = inner.keystrokeTimings;
         } else {
-          decryptionFailed = true;
+          const trimmed = decryptedCleartext.endsWith(" ") ? decryptedCleartext.slice(0, -1) : decryptedCleartext + " ";
+          const altHash = await sha256Base64url(new TextEncoder().encode(trimmed));
+          if (altHash === attestation.cleartextHash) {
+            cleartext = trimmed;
+            keystrokeTimings = inner.keystrokeTimings;
+          } else {
+            decryptionFailed = true;
+          }
         }
       } catch {
         decryptionFailed = true;
@@ -418,7 +446,13 @@ async function verifyLegacy(
       if (hash === attestation.cleartextHash) {
         cleartext = manualCleartext;
       } else {
-        decryptionFailed = true;
+        const trimmed = manualCleartext.endsWith(" ") ? manualCleartext.slice(0, -1) : manualCleartext + " ";
+        const altHash = await sha256Base64url(new TextEncoder().encode(trimmed));
+        if (altHash === attestation.cleartextHash) {
+          cleartext = trimmed;
+        } else {
+          decryptionFailed = true;
+        }
       }
     }
   }
@@ -456,7 +490,7 @@ export async function verifyAttestation(
     const version = detectVersion(parsed);
 
     if (version === "v3") {
-      return await verifyV3(parsed as unknown as KeyWitnessVC, encryptionKey);
+      return await verifyV3(parsed as unknown as KeyWitnessVC, encryptionKey, manualCleartext);
     }
 
     return await verifyLegacy(parsed, encryptionKey, manualCleartext);

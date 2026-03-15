@@ -18,6 +18,10 @@ export default defineSchema({
     deviceVerified: v.optional(v.boolean()),
     /** Index into the status bitstring for revocation checking */
     statusIndex: v.optional(v.number()),
+    /** Public cleartext — set by the author to make the message readable without the encryption key */
+    cleartext: v.optional(v.string()),
+    /** Public encryption key — stored when author makes attestation public */
+    publicEncryptionKey: v.optional(v.string()),
     /** Username and sequential number for typed.by URLs */
     username: v.optional(v.string()),
     usernameSeq: v.optional(v.number()),
@@ -35,6 +39,17 @@ export default defineSchema({
     nextSeq: v.number(),
     createdAt: v.number(),
   }).index("by_username", ["username"]),
+
+  /** Pending email-verified recovery requests */
+  recoveryRequests: defineTable({
+    username: v.string(),
+    newPublicKey: v.string(),
+    /** SHA-256 hex hash of the 6-digit code */
+    codeHash: v.string(),
+    expiresAt: v.number(),
+    attempts: v.number(),
+    used: v.boolean(),
+  }).index("by_username_key", ["username", "newPublicKey"]),
 
   keys: defineTable({
     publicKey: v.string(),

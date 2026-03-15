@@ -117,6 +117,7 @@ http.route({
       id: result.id,
       url,
       statusIndex: result.statusIndex,
+      deviceVerified,
       minimumVersion: minVersion.minimumVersion,
       warnings: warnings.length > 0 ? warnings : undefined,
     }), {
@@ -144,6 +145,50 @@ http.route({
   }),
 });
 
+// POST /api/attestations/make-public - store encryption key to make attestation publicly decryptable
+http.route({
+  path: "/api/attestations/make-public",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const body = await request.json();
+    if (!body.shortId || !body.encryptionKey) {
+      return new Response(JSON.stringify({ error: "Missing shortId or encryptionKey" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      });
+    }
+    try {
+      const result = await ctx.runMutation(api.attestations.makePublic, {
+        shortId: body.shortId,
+        encryptionKey: body.encryptionKey,
+      });
+      return new Response(JSON.stringify(result), {
+        status: 200,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      });
+    } catch (e) {
+      return new Response(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }), {
+        status: 400,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      });
+    }
+  }),
+});
+
+http.route({
+  path: "/api/attestations/make-public",
+  method: "OPTIONS",
+  handler: httpAction(async () => {
+    return new Response(null, {
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+      },
+    });
+  }),
+});
+
 // ── Username API ─────────────────────────────────────────────────────────────
 
 // POST /api/usernames/claim - claim a username
@@ -152,8 +197,9 @@ http.route({
   method: "POST",
   handler: httpAction(async (ctx, request) => {
     const body = await request.json();
-    if (!body.username || !body.publicKey || !body.email || !body.signature) {
-      return new Response(JSON.stringify({ error: "Missing username, publicKey, email, or signature" }), {
+    const missing = ["username", "publicKey", "email", "signature"].filter((k) => !body[k]);
+    if (missing.length > 0) {
+      return new Response(JSON.stringify({ error: `Missing: ${missing.join(", ")}` }), {
         status: 400,
         headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
       });
@@ -180,6 +226,98 @@ http.route({
 
 http.route({
   path: "/api/usernames/claim",
+  method: "OPTIONS",
+  handler: httpAction(async () => {
+    return new Response(null, {
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+      },
+    });
+  }),
+});
+
+// POST /api/usernames/recover - Step 1: request recovery code (sends email)
+http.route({
+  path: "/api/usernames/recover",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const body = await request.json();
+    if (!body.username || !body.newPublicKey || !body.email || !body.signature) {
+      return new Response(JSON.stringify({ error: "Missing username, newPublicKey, email, or signature" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      });
+    }
+    try {
+      const result = await ctx.runAction(api.usernames.requestRecovery, {
+        username: body.username,
+        newPublicKey: body.newPublicKey,
+        email: body.email,
+        signature: body.signature,
+      });
+      return new Response(JSON.stringify(result), {
+        status: 200,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      });
+    } catch (e) {
+      return new Response(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }), {
+        status: 400,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      });
+    }
+  }),
+});
+
+http.route({
+  path: "/api/usernames/recover",
+  method: "OPTIONS",
+  handler: httpAction(async () => {
+    return new Response(null, {
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+      },
+    });
+  }),
+});
+
+// POST /api/usernames/recover/confirm - Step 2: verify code and add key
+http.route({
+  path: "/api/usernames/recover/confirm",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const body = await request.json();
+    if (!body.username || !body.newPublicKey || !body.code || !body.signature) {
+      return new Response(JSON.stringify({ error: "Missing username, newPublicKey, code, or signature" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      });
+    }
+    try {
+      const result = await ctx.runMutation(api.usernames.confirmRecovery, {
+        username: body.username,
+        newPublicKey: body.newPublicKey,
+        code: body.code,
+        signature: body.signature,
+      });
+      return new Response(JSON.stringify(result), {
+        status: 200,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      });
+    } catch (e) {
+      return new Response(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }), {
+        status: 400,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      });
+    }
+  }),
+});
+
+http.route({
+  path: "/api/usernames/recover/confirm",
   method: "OPTIONS",
   handler: httpAction(async () => {
     return new Response(null, {

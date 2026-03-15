@@ -25,6 +25,8 @@ class MainViewController: UIViewController {
     private let testHeader = UILabel()
     private let testTextView = UITextView()
     private let biometricStatusLabel = UILabel()
+    private let emojiToggle = UISwitch()
+    private let recoverButton = UIButton(type: .system)
 
     // MARK: - BLE
 
@@ -583,7 +585,34 @@ class MainViewController: UIViewController {
         description.textAlignment = .center
         description.numberOfLines = 0
 
-        let stack = UIStackView(arrangedSubviews: [publicKeyHeader, usernameStatusLabel, publicKeyLabel, copyKeyButton, registerKeyButton, description])
+        // Recover username button (for new devices)
+        recoverButton.setTitle("Recover Username", for: .normal)
+        recoverButton.titleLabel?.font = UIFont.systemFont(ofSize: 14, weight: .medium)
+        recoverButton.tintColor = .systemOrange
+        recoverButton.addTarget(self, action: #selector(recoverUsername), for: .touchUpInside)
+
+        // Emoji toggle row
+        let emojiLabel = UILabel()
+        emojiLabel.text = "Emoji Links"
+        emojiLabel.font = UIFont.systemFont(ofSize: 15, weight: .medium)
+        emojiLabel.textColor = .white
+
+        let defaults = UserDefaults(suiteName: "group.io.keywitness")
+        emojiToggle.isOn = defaults?.bool(forKey: "useEmojiLinks") ?? false
+        emojiToggle.onTintColor = accentColor
+        emojiToggle.addTarget(self, action: #selector(emojiToggleChanged), for: .valueChanged)
+
+        let emojiRow = UIStackView(arrangedSubviews: [emojiLabel, emojiToggle])
+        emojiRow.axis = .horizontal
+        emojiRow.alignment = .center
+
+        let emojiDescription = UILabel()
+        emojiDescription.text = "Use emoji in seal links instead of base64. Some apps may break emoji URLs."
+        emojiDescription.font = UIFont.systemFont(ofSize: 12, weight: .regular)
+        emojiDescription.textColor = UIColor.darkGray
+        emojiDescription.numberOfLines = 0
+
+        let stack = UIStackView(arrangedSubviews: [publicKeyHeader, usernameStatusLabel, publicKeyLabel, copyKeyButton, registerKeyButton, recoverButton, description, emojiRow, emojiDescription])
         stack.axis = .vertical
         stack.spacing = 12
         stack.alignment = .center
@@ -770,7 +799,12 @@ class MainViewController: UIViewController {
             "email": email,
             "signature": signature,
         ]
+        NSLog("[KeyWitness] Claim payload: username=%@, publicKey=%d chars, email=%@, signature=%d chars",
+              username, publicKey.count, email, signature.count)
         request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+        if request.httpBody == nil {
+            NSLog("[KeyWitness] ERROR: JSON serialization returned nil!")
+        }
 
         registerKeyButton.isEnabled = false
         registerKeyButton.setTitle("Claiming...", for: .normal)
@@ -897,6 +931,199 @@ class MainViewController: UIViewController {
             bleStatusLabel.textColor = .lightGray
             bleKeystrokeCount.isHidden = true
         }
+    }
+
+    // MARK: - Emoji Toggle
+
+    @objc private func emojiToggleChanged() {
+        let defaults = UserDefaults(suiteName: "group.io.keywitness")
+        defaults?.set(emojiToggle.isOn, forKey: "useEmojiLinks")
+    }
+
+    // MARK: - Username Recovery
+
+    @objc private func recoverUsername() {
+        guard let key = publicKeyLabel.text, !key.starts(with: "Error"), !key.starts(with: "Loading") else {
+            return
+        }
+
+        let alert = UIAlertController(
+            title: "Recover Username",
+            message: "Enter your username and the email you registered with to transfer it to this device.",
+            preferredStyle: .alert
+        )
+        alert.addTextField { textField in
+            textField.placeholder = "Username"
+            textField.autocapitalizationType = .none
+            textField.autocorrectionType = .no
+        }
+        alert.addTextField { textField in
+            textField.placeholder = "Recovery email"
+            textField.keyboardType = .emailAddress
+            textField.autocapitalizationType = .none
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Recover", style: .default) { [weak self] _ in
+            guard let self = self else { return }
+            let username = alert.textFields?[0].text?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
+            let email = alert.textFields?[1].text?.trimmingCharacters(in: .whitespaces) ?? ""
+            guard !username.isEmpty, !email.isEmpty else {
+                self.recoverButton.setTitle("Username & email required", for: .normal)
+                self.recoverButton.tintColor = .systemRed
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    self.recoverButton.setTitle("Recover Username", for: .normal)
+                    self.recoverButton.tintColor = .systemOrange
+                }
+                return
+            }
+            self.doRecoverUsername(publicKey: key, username: username, email: email)
+        })
+        present(alert, animated: true)
+    }
+
+    private func doRecoverUsername(publicKey: String, username: String, email: String) {
+        let signature: String
+        do {
+            let message = "keywitness:recover:\(username)"
+            guard let data = message.data(using: .utf8) else { return }
+            signature = try CryptoEngine.signBase64URL(data)
+        } catch {
+            NSLog("[KeyWitness] Failed to sign recovery: %@", error.localizedDescription)
+            recoverButton.setTitle("Signing failed", for: .normal)
+            recoverButton.tintColor = .systemRed
+            return
+        }
+
+        // Step 1: Request recovery code (server sends email)
+        let url = URL(string: "https://www.keywitness.io/api/usernames/recover")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let payload: [String: String] = [
+            "username": username,
+            "newPublicKey": publicKey,
+            "email": email,
+            "signature": signature,
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+
+        recoverButton.isEnabled = false
+        recoverButton.setTitle("Sending code...", for: .normal)
+
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.recoverButton.isEnabled = true
+
+                if let httpResponse = response as? HTTPURLResponse,
+                   httpResponse.statusCode == 200,
+                   error == nil {
+                    // Step 2: Prompt for the emailed code
+                    self.promptForRecoveryCode(publicKey: publicKey, username: username, signature: signature)
+                } else {
+                    var errorMsg = "Recovery failed"
+                    if let data = data,
+                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let err = json["error"] as? String {
+                        errorMsg = err
+                    }
+                    self.recoverButton.setTitle(errorMsg, for: .normal)
+                    self.recoverButton.tintColor = .systemRed
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                        self.recoverButton.setTitle("Recover Username", for: .normal)
+                        self.recoverButton.tintColor = .systemOrange
+                    }
+                }
+            }
+        }.resume()
+    }
+
+    private func promptForRecoveryCode(publicKey: String, username: String, signature: String) {
+        let alert = UIAlertController(
+            title: "Check Your Email",
+            message: "We sent a 6-digit code to your recovery email. Enter it below.",
+            preferredStyle: .alert
+        )
+        alert.addTextField { textField in
+            textField.placeholder = "6-digit code"
+            textField.keyboardType = .numberPad
+            textField.textContentType = .oneTimeCode
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { [weak self] _ in
+            self?.recoverButton.setTitle("Recover Username", for: .normal)
+            self?.recoverButton.tintColor = .systemOrange
+        })
+        alert.addAction(UIAlertAction(title: "Verify", style: .default) { [weak self] _ in
+            guard let self = self else { return }
+            let code = alert.textFields?[0].text?.trimmingCharacters(in: .whitespaces) ?? ""
+            guard code.count == 6 else {
+                self.recoverButton.setTitle("Invalid code", for: .normal)
+                self.recoverButton.tintColor = .systemRed
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    self.recoverButton.setTitle("Recover Username", for: .normal)
+                    self.recoverButton.tintColor = .systemOrange
+                }
+                return
+            }
+            self.confirmRecoveryCode(publicKey: publicKey, username: username, code: code, signature: signature)
+        })
+        present(alert, animated: true)
+    }
+
+    private func confirmRecoveryCode(publicKey: String, username: String, code: String, signature: String) {
+        let url = URL(string: "https://www.keywitness.io/api/usernames/recover/confirm")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let payload: [String: String] = [
+            "username": username,
+            "newPublicKey": publicKey,
+            "code": code,
+            "signature": signature,
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+
+        recoverButton.isEnabled = false
+        recoverButton.setTitle("Verifying...", for: .normal)
+
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.recoverButton.isEnabled = true
+
+                if let httpResponse = response as? HTTPURLResponse,
+                   httpResponse.statusCode == 200,
+                   error == nil {
+                    let defaults = UserDefaults(suiteName: "group.io.keywitness")
+                    defaults?.set(username, forKey: "claimedUsername")
+                    self.doRegisterName(publicKey: publicKey, name: username)
+                    self.usernameStatusLabel.text = "typed.by/\(username)"
+                    self.usernameStatusLabel.isHidden = false
+                    self.registerKeyButton.setTitle("Change Username", for: .normal)
+                    self.recoverButton.setTitle("Recovered!", for: .normal)
+                    self.recoverButton.tintColor = .systemGreen
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                        self.recoverButton.setTitle("Recover Username", for: .normal)
+                        self.recoverButton.tintColor = .systemOrange
+                    }
+                } else {
+                    var errorMsg = "Verification failed"
+                    if let data = data,
+                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let err = json["error"] as? String {
+                        errorMsg = err
+                    }
+                    self.recoverButton.setTitle(errorMsg, for: .normal)
+                    self.recoverButton.tintColor = .systemRed
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                        self.recoverButton.setTitle("Recover Username", for: .normal)
+                        self.recoverButton.tintColor = .systemOrange
+                    }
+                }
+            }
+        }.resume()
     }
 
     // MARK: - Keyboard Dismiss

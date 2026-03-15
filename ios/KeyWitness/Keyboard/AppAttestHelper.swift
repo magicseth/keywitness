@@ -15,6 +15,7 @@ final class AppAttestHelper {
     // Use separate keys from the main app since App Attest keys are process-bound
     private static let keyIdKey = "keyboardAppAttestKeyId"
     private static let attestedKey = "keyboardAppAttestCompleted"
+    private static let attestationObjectKey = "keyboardAppAttestAttestationObject"
 
     /// Whether App Attest is available and the key has been attested.
     var isAvailable: Bool {
@@ -29,6 +30,11 @@ final class AppAttestHelper {
         defaults?.string(forKey: Self.keyIdKey)
     }
 
+    /// The base64url-encoded CBOR attestation object from Apple (contains X.509 cert chain).
+    var attestationObject: String? {
+        defaults?.string(forKey: Self.attestationObjectKey)
+    }
+
     private var isAttested: Bool {
         defaults?.bool(forKey: Self.attestedKey) ?? false
     }
@@ -38,6 +44,7 @@ final class AppAttestHelper {
         NSLog("[AppAttestHelper] Resetting attested state — key is invalid")
         defaults?.removeObject(forKey: Self.keyIdKey)
         defaults?.removeObject(forKey: Self.attestedKey)
+        defaults?.removeObject(forKey: Self.attestationObjectKey)
     }
 
     // MARK: - Setup (runs in keyboard extension process)
@@ -84,8 +91,12 @@ final class AppAttestHelper {
             throw error
         }
 
-        // Step 4: Verify with server
-        NSLog("[AppAttestHelper] Step 4: Verifying with server...")
+        // Step 4: Store attestation object for independent verification
+        defaults?.set(CryptoEngine.base64URLEncode(attestationObject), forKey: Self.attestationObjectKey)
+        NSLog("[AppAttestHelper] Step 4: Stored attestation object (%d bytes)", attestationObject.count)
+
+        // Step 5: Verify with server
+        NSLog("[AppAttestHelper] Step 5: Verifying with server...")
         let ed25519PublicKey = try CryptoEngine.publicKeyBase64URL()
         try await verifyWithServer(
             keyId: currentKeyId,

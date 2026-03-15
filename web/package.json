@@ -17,6 +17,7 @@
     "deploy": "npm run deploy:backend && VITE_CONVEX_URL=https://quick-curlew-492.convex.cloud npm run build && npm run deploy:static"
   },
   "dependencies": {
+    "@convex-dev/resend": "^0.2.3",
     "@convex-dev/self-hosting": "github:get-convex/static-hosting",
     "@peculiar/x509": "^1.14.3",
     "bs58": "^6.0.0",

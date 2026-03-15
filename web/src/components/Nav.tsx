@@ -3,6 +3,8 @@ const links = [
   { href: "/manifesto", label: "Humanifesto" },
   { href: "/how", label: "How It Works" },
   { href: "/developers", label: "Developers" },
+  { href: "https://x.com/magicseth", label: "TestFlight", external: true },
+  { href: "https://github.com/magicseth/keywitness", label: "GitHub", external: true },
 ];
 
 export default function Nav() {
@@ -19,6 +21,7 @@ export default function Nav() {
             <a
               key={link.href}
               href={link.href}
+              {...("external" in link ? { target: "_blank", rel: "noopener noreferrer" } : {})}
               className={`text-xs font-medium transition-colors ${
                 path === link.href
                   ? "text-white"

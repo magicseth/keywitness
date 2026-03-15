@@ -73,14 +73,16 @@ final class AttestationBuilder {
                                     faceIdVerified: Bool,
                                     appAttestKeyId: String? = nil,
                                     appAttestAssertion: String? = nil,
-                                    appAttestClientData: String? = nil) throws -> (block: String, encryptionKey: String) {
+                                    appAttestClientData: String? = nil,
+                                    appAttestObject: String? = nil) throws -> (block: String, encryptionKey: String) {
         return try VCBuilder.createVC(
             cleartext: cleartext,
             keystrokeEvents: keystrokeEvents,
             faceIdVerified: faceIdVerified,
             appAttestKeyId: appAttestKeyId,
             appAttestAssertion: appAttestAssertion,
-            appAttestClientData: appAttestClientData
+            appAttestClientData: appAttestClientData,
+            appAttestObject: appAttestObject
         )
     }
 

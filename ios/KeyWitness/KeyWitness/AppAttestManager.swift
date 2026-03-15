@@ -19,6 +19,7 @@ final class AppAttestManager {
 
     private static let keyIdKey = "appAttestKeyId"
     private static let attestedKey = "appAttestCompleted"
+    private static let attestationObjectKey = "appAttestAttestationObject"
 
     // MARK: - Public Properties
 
@@ -30,6 +31,12 @@ final class AppAttestManager {
 
     var isAttested: Bool {
         defaults?.bool(forKey: Self.attestedKey) ?? false
+    }
+
+    /// The base64url-encoded CBOR attestation object from Apple (contains X.509 cert chain).
+    /// Used to embed in VCs for independent verification without server trust.
+    var attestationObject: String? {
+        defaults?.string(forKey: Self.attestationObjectKey)
     }
 
     // MARK: - Setup
@@ -109,9 +116,13 @@ final class AppAttestManager {
             throw error
         }
 
-        // Step 5: Mark as complete
+        // Step 5: Store attestation object for independent verification
+        defaults?.set(CryptoEngine.base64URLEncode(attestationObject), forKey: Self.attestationObjectKey)
+        NSLog("[AppAttest] Step 5: Stored attestation object (%d bytes)", attestationObject.count)
+
+        // Step 6: Mark as complete
         defaults?.set(true, forKey: Self.attestedKey)
-        NSLog("[AppAttest] Step 5: SETUP COMPLETE! isAttested=%d", isAttested ? 1 : 0)
+        NSLog("[AppAttest] Step 6: SETUP COMPLETE! isAttested=%d", isAttested ? 1 : 0)
     }
 
     // MARK: - Server Communication
@@ -194,9 +205,10 @@ final class AppAttestManager {
             return assertion
         } catch {
             let nsError = error as NSError
-            // DCError.invalidKey = 3 — key was invalidated (reinstall, etc.)
-            if nsError.domain == "com.apple.devicecheck.error" && nsError.code == 3 {
-                NSLog("[AppAttest] Key invalid (code 3) — resetting and re-attesting...")
+            // DCError.invalidInput = 2 (key doesn't exist, e.g. new device with synced UserDefaults)
+            // DCError.invalidKey = 3 (key was invalidated, e.g. reinstall)
+            if nsError.domain == "com.apple.devicecheck.error" && (nsError.code == 2 || nsError.code == 3) {
+                NSLog("[AppAttest] Key invalid (code %d) — resetting and re-attesting...", nsError.code)
                 resetIfNeeded()
                 try await setupIfNeeded()
                 guard let newKeyId = keyId else {
@@ -267,6 +279,7 @@ final class AppAttestManager {
         log.warning("Resetting App Attest state")
         defaults?.removeObject(forKey: Self.keyIdKey)
         defaults?.removeObject(forKey: Self.attestedKey)
+        defaults?.removeObject(forKey: Self.attestationObjectKey)
         defaults?.removeObject(forKey: Self.sessionAssertionKey)
         defaults?.removeObject(forKey: Self.sessionKeyIdKey)
         defaults?.removeObject(forKey: Self.sessionClientDataKey)

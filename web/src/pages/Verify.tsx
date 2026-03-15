@@ -86,6 +86,20 @@ function CleartextWithAttribution({ cleartext, timings, isVoice }: {
     );
   }
 
+  // No keystroke timings — show text in neutral color (public attestation without encryption key)
+  if (!timings || timings.length === 0) {
+    return (
+      <div>
+        <div className="text-xl leading-relaxed break-words text-white">
+          {cleartext}
+        </div>
+        <div className="text-[11px] text-gray-600 mt-2 flex items-center gap-1.5">
+          Keystroke attribution requires the encryption key
+        </div>
+      </div>
+    );
+  }
+
   const attribution = attributeCleartext(cleartext, timings);
   const hasUnattested = attribution.some((a) => !a.attested);
 
@@ -206,6 +220,9 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
   const [, setKnownKeyVersion] = useState(0);
   const [trustStatus, setTrustStatus] = useState<TrustStatus | null>(null);
   const [resolvedShortId, setResolvedShortId] = useState<string | undefined>(undefined);
+  const [serverDeviceVerified, setServerDeviceVerified] = useState<boolean | undefined>(undefined);
+  const [madePublic, setMadePublic] = useState<boolean | null>(null);
+  const [makingPublic, setMakingPublic] = useState(false);
 
   // Resolve typed.by vanity URL (username/seq) to shortId
   useEffect(() => {
@@ -222,7 +239,7 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
   // Try to extract the encryption key from the URL fragment.
   // It may be a plain base64url key, emoji encoding, or old zero-width encoding.
   // Some browsers percent-encode emoji in hash fragments, so decode first.
-  const encryptionKey = (() => {
+  const urlEncryptionKey = (() => {
     const rawFragment = window.location.hash.slice(1);
     if (!rawFragment) return undefined;
     // Percent-decode in case browser encoded the emoji
@@ -248,6 +265,9 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
     queryId ? { shortId: queryId } : "skip",
   );
 
+  // Use URL key first, fall back to DB-stored public key
+  const encryptionKey = urlEncryptionKey || attestationDoc?.publicEncryptionKey || undefined;
+
   const keyRecord = useQuery(
     api.keys.getByPublicKey,
     result?.publicKey ? { publicKey: result.publicKey } : "skip",
@@ -258,6 +278,7 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
       if (!text.trim()) return;
       setVerifying(true);
       setTrustStatus(null);
+      setServerDeviceVerified(undefined);
       try {
         const res = await verifyAttestation(text, encryptionKey, manualText);
         setResult(res);
@@ -279,6 +300,22 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
             }
           } catch {
             // Trust check is best-effort; don't block verification
+          }
+        }
+        // Upload to server for device verification (App Attest requires server-side P-256)
+        if (res.valid) {
+          try {
+            const resp = await fetch("/api/attestations", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ attestation: text }),
+            });
+            if (resp.ok) {
+              const serverData = await resp.json();
+              setServerDeviceVerified(serverData.deviceVerified ?? false);
+            }
+          } catch {
+            // Server verification is best-effort
           }
         }
       } finally {
@@ -304,6 +341,9 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
         handleVerify(attestationDoc.attestation);
       }
     }
+    if (attestationDoc?.publicEncryptionKey) {
+      setMadePublic(true);
+    }
   }, [attestationDoc, handleVerify]);
 
   const onVerifyClick = () => handleVerify(input);
@@ -319,7 +359,7 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
 
   const writerName = keyRecord ? keyRecord.name : knownKeyName;
   // Use DB-verified status when available, fall back to VC claims for pasted attestations
-  const hasDeviceVerification = !!attestationDoc?.deviceVerified || !!result?.appAttestPresent;
+  const hasDeviceVerification = !!attestationDoc?.deviceVerified || !!serverDeviceVerified || !!result?.appAttestPresent;
   const hasFaceId = !!attestationDoc?.biometricSignature || !!result?.faceIdVerified;
   const hasKeystrokeData = !!(result?.keystrokeTimings && result.keystrokeTimings.length > 0);
   // Even without decrypted timings, keystroke proof is present if the VC has keystroke data
@@ -447,6 +487,32 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
                         <blockquote className="text-[22px] sm:text-[26px] leading-[1.45] text-white font-light tracking-[-0.01em]">
                           <CleartextWithAttribution cleartext={result.cleartext} timings={result.keystrokeTimings} encrypted={result.encrypted} isVoice={isVoice} />
                         </blockquote>
+                        {queryId && encryptionKey && result.encrypted && madePublic === null && (
+                          <button
+                            onClick={async () => {
+                              setMakingPublic(true);
+                              try {
+                                const resp = await fetch("/api/attestations/make-public", {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ shortId: queryId, encryptionKey }),
+                                });
+                                if (resp.ok) {
+                                  setMadePublic(true);
+                                }
+                              } finally {
+                                setMakingPublic(false);
+                              }
+                            }}
+                            disabled={makingPublic}
+                            className="mt-3 text-xs px-3 py-1.5 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-500 disabled:opacity-40 transition-colors"
+                          >
+                            {makingPublic ? "Saving..." : "Make public — anyone can read without the key"}
+                          </button>
+                        )}
+                        {madePublic && result.encrypted && (
+                          <div className="mt-2 text-xs text-gray-500">This message is public — readable without the encryption key.</div>
+                        )}
                       </div>
                     ) : result.encrypted && !result.cleartext ? (
                       <div>
@@ -468,12 +534,40 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
                           }}
                         />
                         {hashMatchResult === "match" ? (
-                          <div className="flex items-center gap-2 text-green-400 text-sm font-medium">
-                            <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none">
-                              <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" />
-                              <path d="M5 8l2 2 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                            </svg>
-                            Text matches — this is exactly what was typed
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-2 text-green-400 text-sm font-medium">
+                              <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none">
+                                <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" />
+                                <path d="M5 8l2 2 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                              Text matches — this is exactly what was typed
+                            </div>
+                            {queryId && encryptionKey && madePublic === null && (
+                              <button
+                                onClick={async () => {
+                                  setMakingPublic(true);
+                                  try {
+                                    const resp = await fetch("/api/attestations/make-public", {
+                                      method: "POST",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({ shortId: queryId, encryptionKey }),
+                                    });
+                                    if (resp.ok) {
+                                      setMadePublic(true);
+                                    }
+                                  } finally {
+                                    setMakingPublic(false);
+                                  }
+                                }}
+                                disabled={makingPublic}
+                                className="text-xs px-3 py-1.5 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-500 disabled:opacity-40 transition-colors"
+                              >
+                                {makingPublic ? "Saving..." : "Make public — anyone can read without the key"}
+                              </button>
+                            )}
+                            {madePublic && (
+                              <div className="text-xs text-gray-500">This message is public — readable without the encryption key.</div>
+                            )}
                           </div>
                         ) : hashMatchResult === "mismatch" ? (
                           <div className="text-red-400 text-sm">
@@ -484,7 +578,14 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
                             onClick={async () => {
                               const normalized = normalizePastedText(manualCleartext);
                               const hash = await sha256Base64url(normalized);
-                              setHashMatchResult(hash === result.cleartextHash ? "match" : "mismatch");
+                              if (hash === result.cleartextHash) {
+                                setHashMatchResult("match");
+                              } else {
+                                // Trailing space can be lost during copy-paste
+                                const alt = normalized.endsWith(" ") ? normalized.slice(0, -1) : normalized + " ";
+                                const altHash = await sha256Base64url(alt);
+                                setHashMatchResult(altHash === result.cleartextHash ? "match" : "mismatch");
+                              }
                             }}
                             disabled={!manualCleartext.trim()}
                             className="px-4 py-1.5 bg-white text-black text-sm font-medium rounded-lg hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
@@ -619,7 +720,7 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
 
                     {/* Proof Chain */}
                     {result.proofs && result.proofs.length > 0 && (
-                      <ProofChain proofs={result.proofs} />
+                      <ProofChain proofs={result.proofs} serverDeviceVerified={serverDeviceVerified} />
                     )}
 
                     {/* Issuer DID */}
@@ -737,27 +838,35 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
 
 // ── Proof Chain component (v3 multi-proof) ──────────────────────────────────
 
-function ProofChain({ proofs }: { proofs: ProofVerificationResult[] }) {
+function ProofChain({ proofs, serverDeviceVerified }: { proofs: ProofVerificationResult[]; serverDeviceVerified?: boolean }) {
   return (
     <div className="px-5 py-3">
       <div className="text-xs text-gray-600 mb-1.5">Proofs</div>
       <div className="space-y-1.5">
-        {proofs.map((proof, i) => (
+        {proofs.map((proof, i) => {
+          const isDevice = proof.proofType === "deviceAttestation";
+          const valid = isDevice ? (serverDeviceVerified || proof.valid) : proof.valid;
+          const error = isDevice && serverDeviceVerified ? undefined : proof.error;
+          return (
           <div key={i} className="flex items-center gap-2 text-xs">
-            <span className={proof.valid ? "text-green-400" : "text-red-400"}>
-              {proof.valid ? "\u2713" : "\u2717"}
+            <span className={valid ? "text-green-400" : "text-red-400"}>
+              {valid ? "\u2713" : "\u2717"}
             </span>
-            <span className={proof.valid ? "text-gray-300" : "text-red-400"}>
+            <span className={valid ? "text-gray-300" : "text-red-400"}>
               {proofTypeLabel(proof.proofType)}
             </span>
-            {proof.error && (
-              <span className="text-red-400/60">{"\u2014"} {proof.error}</span>
+            {isDevice && serverDeviceVerified && (
+              <span className="text-green-500/70">(server-verified)</span>
+            )}
+            {error && (
+              <span className="text-red-400/60">{"\u2014"} {error}</span>
             )}
             {proof.details?.verifiedBy ? (
               <span className="text-gray-600">({String(proof.details.verifiedBy)})</span>
             ) : null}
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

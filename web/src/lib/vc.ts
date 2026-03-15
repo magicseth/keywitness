@@ -12,6 +12,7 @@
 import canonicalize from "canonicalize";
 import nacl from "tweetnacl";
 import bs58 from "bs58";
+import { verifyAppAttestIndependently } from "./appAttest";
 import { decodeDIDKey } from "./didkey";
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -38,6 +39,8 @@ export interface AppleAppAttestProof {
   keyId: string;
   assertionData?: string; // base64url CBOR assertion
   clientData?: string;
+  /** CBOR attestation object with X.509 cert chain for independent verification */
+  attestationObject?: string;
   proofType: "deviceAttestation";
   /** Server-verified flag for pre-migration attestations */
   serverVerified?: boolean;
@@ -225,15 +228,38 @@ export async function verifyEddsaJcs2022(
 export async function verifyAppAttestProof(
   proof: AppleAppAttestProof,
 ): Promise<ProofVerificationResult> {
-  // Never trust the self-asserted serverVerified flag in the proof payload.
-  // It's set by the attestation creator and can be forged. Device attestation
-  // validity must be determined by server-side verification against stored
-  // App Attest credentials (appAttestCredentials table lookup).
+  // If the attestation object (CBOR with X.509 cert chain) is present along
+  // with assertion data and client data, we can verify independently using
+  // only Apple's root CA — no server trust required.
+  if (proof.attestationObject && proof.assertionData && proof.clientData) {
+    try {
+      const result = await verifyAppAttestIndependently(
+        proof.attestationObject,
+        proof.assertionData,
+        proof.clientData,
+      );
+      return {
+        proofType: "deviceAttestation",
+        valid: result.valid,
+        error: result.error,
+        details: {
+          keyId: proof.keyId,
+          created: proof.created,
+          verifiedBy: "client (Apple Root CA)",
+          leafPublicKey: result.leafPublicKey,
+        },
+      };
+    } catch (e) {
+      return {
+        proofType: "deviceAttestation",
+        valid: false,
+        error: `Independent verification failed: ${e instanceof Error ? e.message : String(e)}`,
+        details: { keyId: proof.keyId, created: proof.created },
+      };
+    }
+  }
 
-  // Assertion data is present but we cannot verify P-256 ECDSA client-side
-  // (requires the stored credential public key from the server).
-  // Do NOT mark as valid — assertionData alone is untrusted without
-  // cryptographic verification against stored App Attest credentials.
+  // Legacy: assertion data present but no attestation object — can't verify client-side
   if (proof.assertionData) {
     return {
       proofType: "deviceAttestation",
