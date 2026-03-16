@@ -6,6 +6,8 @@ const Developers = lazy(() => import("./pages/Developers"));
 const Manifesto = lazy(() => import("./pages/Manifesto"));
 const BLEDemo = lazy(() => import("./pages/BLEDemo"));
 const Landing = lazy(() => import("./pages/Landing"));
+const Privacy = lazy(() => import("./pages/Privacy"));
+const Support = lazy(() => import("./pages/Support"));
 
 function Loading() {
   return <div className="min-h-screen bg-[#0a0a0a]" />;
@@ -28,6 +30,14 @@ export default function App() {
 
   if (path === "/demo") {
     return <Suspense fallback={<Loading />}><BLEDemo /></Suspense>;
+  }
+
+  if (path === "/privacy") {
+    return <Suspense fallback={<Loading />}><Privacy /></Suspense>;
+  }
+
+  if (path === "/support") {
+    return <Suspense fallback={<Loading />}><Support /></Suspense>;
   }
 
   if (path === "/verify") {
