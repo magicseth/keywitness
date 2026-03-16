@@ -231,7 +231,7 @@ final class BLEPeripheralManager: NSObject {
         NSLog("[BLE] Session init: version=%d, nonce=%d bytes", version, nonce.count)
 
         // Create session
-        let sessionId = Data((0..<16).map { _ in UInt8.random(in: 0...255) })
+            let sessionId = Data((0..<16).map { _ in UInt8.random(in: 0...255) })
         let session = BLESession(sessionId: sessionId, nonce: Data(nonce), central: central)
         activeSession = session
         attestRequestBuffer.reset()
