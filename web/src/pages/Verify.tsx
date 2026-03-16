@@ -680,6 +680,19 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
                   )}
                 </div>
 
+                {/* What this doesn't mean */}
+                <details className="group rounded-xl px-6 py-4 bg-[#111] border border-gray-800">
+                  <summary className="text-sm text-gray-400 font-medium cursor-pointer hover:text-gray-300 transition-colors flex items-center gap-1.5">
+                    <span className="group-open:rotate-90 transition-transform">{"\u25B6"}</span>
+                    What this doesn't mean
+                  </summary>
+                  <div className="mt-3 space-y-2 text-sm text-gray-500 leading-relaxed">
+                    <p><span className="text-gray-400">Not proof of identity</span> — we know which device typed this, not who was holding it (unless Face ID is present).</p>
+                    <p><span className="text-gray-400">Not proof of intent</span> — the typist may have been coerced, dictated to, or copying from a script.</p>
+                    <p><span className="text-gray-400">Not proof of originality</span> — the text could be a quote, a copy of someone else's words, or a known phrase typed by hand.</p>
+                  </div>
+                </details>
+
                 {/* Trust warnings */}
                 {trustStatus && (trustStatus.keyRevoked || trustStatus.credentialRevoked || trustStatus.appVersionTrusted === false) && (
                   <div className="rounded-xl px-6 py-4 bg-orange-950/30 border border-orange-900/30">

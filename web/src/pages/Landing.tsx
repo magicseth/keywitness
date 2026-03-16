@@ -1,4 +1,4 @@
-import { useState, useEffect, type ReactNode } from "react";
+import { useState, useEffect, useRef, type ReactNode } from "react";
 import Nav from "../components/Nav";
 import { Section, Stagger } from "../components/ScrollReveal";
 
@@ -125,6 +125,51 @@ function FeatureCard({ title, description }: { title: string; description: strin
     <div className="border border-gray-800 rounded-xl p-5 bg-[#0d0d0d] hover:border-gray-700 transition-colors">
       <div className="text-white font-semibold mb-1.5">{title}</div>
       <div className="text-gray-500 text-sm leading-relaxed">{description}</div>
+    </div>
+  );
+}
+
+// ── TestFlight CTA with popover ───────────────────────────────────────────────
+
+function TestFlightCTA() {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(!open)}
+        className="px-8 py-3.5 bg-white text-black font-semibold rounded-xl hover:bg-gray-200 transition-colors text-sm"
+      >
+        Get TestFlight Access
+      </button>
+      {open && (
+        <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-3 w-72 bg-[#141414] border border-gray-700 rounded-xl p-5 shadow-2xl z-50">
+          <p className="text-sm text-gray-300 leading-relaxed">
+            DM{" "}
+            <a href="https://x.com/magicseth" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline font-medium">
+              @magicseth
+            </a>{" "}
+            on X with:
+          </p>
+          <p className="text-white font-medium text-sm mt-2 bg-[#0a0a0a] border border-gray-800 rounded-md px-3 py-2 text-center">
+            "I'm a human"
+          </p>
+          <p className="text-gray-500 text-xs mt-2">
+            You'll get a TestFlight invite link back.
+          </p>
+          <div className="absolute left-1/2 -translate-x-1/2 top-full w-3 h-3 bg-[#141414] border-r border-b border-gray-700 rotate-45 -mt-1.5" />
+        </div>
+      )}
     </div>
   );
 }
@@ -306,14 +351,7 @@ export default function Landing() {
                 Get the iOS keyboard or verify someone else's seal.
               </p>
               <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-                <a
-                  href="https://x.com/magicseth"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-8 py-3.5 bg-white text-black font-semibold rounded-xl hover:bg-gray-200 transition-colors text-sm"
-                >
-                  Get TestFlight Access
-                </a>
+                <TestFlightCTA />
                 <a
                   href="/verify"
                   className="px-8 py-3.5 bg-[#111] border border-gray-700 text-white font-semibold rounded-xl hover:border-gray-500 transition-colors text-sm"
@@ -321,9 +359,6 @@ export default function Landing() {
                   Verify a Seal
                 </a>
               </div>
-              <p className="text-gray-600 text-xs mt-4">
-                DM <a href="https://x.com/magicseth" className="text-gray-500 hover:text-gray-400" target="_blank" rel="noopener noreferrer">@magicseth</a> on X with "I'm a human" for an invite.
-              </p>
             </div>
           </Section>
         </div>
