@@ -1,0 +1,103 @@
+═══════════════════════════════════════════════════════════════
+APP STORE CONNECT — KEYWITNESS
+═══════════════════════════════════════════════════════════════
+
+APP NAME:
+KeyWitness
+
+SUBTITLE (30 chars max):
+Prove your words are yours.
+
+CATEGORY:
+Utilities
+
+AGE RATING:
+4+
+
+═══════════════════════════════════════════════════════════════
+DESCRIPTION
+═══════════════════════════════════════════════════════════════
+
+KeyWitness is a keyboard that creates cryptographic proof your text was typed by a human on a real device — not pasted, not generated, not AI.
+
+HOW IT WORKS
+Type on the KeyWitness keyboard. It captures your unique keystroke rhythm — timing, position, pressure. Tap Seal, and the keyboard builds a W3C Verifiable Credential signed by your device's Secure Enclave. Share the link. Anyone can verify the proof in their browser — no app needed, no trust required.
+
+WHAT IT PROVES
+• Human input — keystroke biometrics that can't be faked
+• Real device — Apple App Attest confirms a genuine, unmodified iPhone
+• Content integrity — Ed25519 signature locks the text to the moment
+• Owner confirmation — optional Face ID proves the phone's owner approved it
+
+PRIVACY BY DESIGN
+Your text is encrypted with AES-256-GCM before it ever leaves your device. The encryption key lives in the URL fragment — our server stores an encrypted blob it cannot read. No accounts, no tracking, no analytics.
+
+OPEN STANDARDS
+Built on W3C Verifiable Credentials 2.0, did:key, eddsa-jcs-2022, and BitstringStatusList. Any conforming verifier can validate a KeyWitness credential. Fully open source.
+
+═══════════════════════════════════════════════════════════════
+KEYWORDS (100 chars max)
+═══════════════════════════════════════════════════════════════
+
+human,verification,proof,typing,keyboard,cryptographic,AI,attestation,credential,biometric
+
+═══════════════════════════════════════════════════════════════
+PROMOTIONAL TEXT (170 chars, editable without review)
+═══════════════════════════════════════════════════════════════
+
+Cryptographic proof of human input. Every sealed message carries verifiable evidence it was typed by a real person on a real device.
+
+═══════════════════════════════════════════════════════════════
+URLS
+═══════════════════════════════════════════════════════════════
+
+Privacy Policy:  https://keywitness.io/privacy
+Support URL:     https://keywitness.io/support
+Marketing URL:   https://keywitness.io
+
+═══════════════════════════════════════════════════════════════
+APP REVIEW NOTES
+═══════════════════════════════════════════════════════════════
+
+HOW TO TEST:
+1. Complete onboarding and enable the KeyWitness keyboard with Full Access
+2. Open Notes, switch to the KeyWitness keyboard (hold the globe icon)
+3. Type any message, then tap "Seal" on the keyboard
+4. A verification link appears — open it in Safari to see the proof page
+
+WHY FULL ACCESS IS REQUIRED:
+Full Access enables the keyboard to upload an encrypted attestation to keywitness.io so the user can share a verification link. The keyboard only communicates with keywitness.io, and only when the user explicitly taps Seal. It never transmits keystrokes, cleartext, or any user input at any other time.
+
+No user data is collected. The server cannot read the encrypted content. There are no accounts, no tracking, no analytics.
+
+═══════════════════════════════════════════════════════════════
+EXPORT COMPLIANCE
+═══════════════════════════════════════════════════════════════
+
+Uses encryption: Yes
+Exempt under EAR: Yes
+(Standard encryption for authentication/digital signatures —
+qualifies for exemption under Category 5, Part 2, Note 4)
+
+═══════════════════════════════════════════════════════════════
+CONTENT RIGHTS
+═══════════════════════════════════════════════════════════════
+
+Does not contain third-party content.
+No sign-in required.
+
+═══════════════════════════════════════════════════════════════
+SCREENSHOTS NEEDED
+═══════════════════════════════════════════════════════════════
+
+Required sizes:
+  • iPhone 6.7" (1290 x 2796) — iPhone 15 Pro Max simulator
+  • iPhone 6.1" (1179 x 2556) — iPhone 15 Pro simulator
+
+Take 5 screenshots on each size (Cmd+S in Simulator):
+
+  1. ONBOARDING — Welcome screen ("KeyWitness / Proof you're human. Not AI.")
+  2. KEYBOARD   — Typing a message in Notes with KeyWitness keyboard visible
+  3. SEAL       — The Seal button / sealed confirmation on keyboard
+  4. VERIFY     — Safari showing verified attestation with green checkmarks
+  5. FACE ID    — Face ID confirmation badge or the trust chain details
