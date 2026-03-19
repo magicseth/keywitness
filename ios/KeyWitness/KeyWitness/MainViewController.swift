@@ -444,6 +444,121 @@ class MainViewController: UIViewController {
         }
     }
 
+    // MARK: - UI Helpers
+
+    private let statusDotSize: CGFloat = 6
+    private let greenGlow = UIColor(red: 0.20, green: 0.83, blue: 0.47, alpha: 1.0)
+    private let dimText = UIColor(red: 0.40, green: 0.40, blue: 0.44, alpha: 1.0)
+    private let cardBorder = UIColor(red: 0.18, green: 0.18, blue: 0.22, alpha: 1.0)
+    private let fieldBg = UIColor(red: 0.08, green: 0.08, blue: 0.10, alpha: 1.0)
+
+    private func makeCard() -> UIView {
+        let card = UIView()
+        card.backgroundColor = cardColor
+        card.layer.cornerRadius = 16
+        card.layer.borderWidth = 0.5
+        card.layer.borderColor = cardBorder.cgColor
+        card.translatesAutoresizingMaskIntoConstraints = false
+        return card
+    }
+
+    private func makeSectionLabel(_ text: String) -> UILabel {
+        let label = UILabel()
+        label.text = text.uppercased()
+        label.font = UIFont.systemFont(ofSize: 11, weight: .semibold)
+        label.textColor = dimText
+        label.setContentHuggingPriority(.required, for: .vertical)
+        return label
+    }
+
+    private func makeStatusPill(icon: String, label: String, active: Bool) -> UIView {
+        let container = UIView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+
+        let dot = UIView()
+        dot.translatesAutoresizingMaskIntoConstraints = false
+        dot.backgroundColor = active ? greenGlow : UIColor(white: 0.3, alpha: 1)
+        dot.layer.cornerRadius = statusDotSize / 2
+        if active {
+            dot.layer.shadowColor = greenGlow.cgColor
+            dot.layer.shadowRadius = 4
+            dot.layer.shadowOpacity = 0.6
+            dot.layer.shadowOffset = .zero
+        }
+
+        let iconView = UIImageView(image: UIImage(systemName: icon))
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.tintColor = active ? UIColor.white : dimText
+        iconView.contentMode = .scaleAspectFit
+
+        let textLabel = UILabel()
+        textLabel.text = label
+        textLabel.font = UIFont.systemFont(ofSize: 10, weight: .medium)
+        textLabel.textColor = active ? UIColor(white: 0.85, alpha: 1) : dimText
+
+        let stack = UIStackView(arrangedSubviews: [dot, iconView, textLabel])
+        stack.axis = .horizontal
+        stack.spacing = 4
+        stack.alignment = .center
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        container.addSubview(stack)
+        NSLayoutConstraint.activate([
+            dot.widthAnchor.constraint(equalToConstant: statusDotSize),
+            dot.heightAnchor.constraint(equalToConstant: statusDotSize),
+            iconView.widthAnchor.constraint(equalToConstant: 12),
+            iconView.heightAnchor.constraint(equalToConstant: 12),
+            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 6),
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 10),
+            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -10),
+            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -6),
+        ])
+
+        container.backgroundColor = UIColor(white: 0.10, alpha: 1)
+        container.layer.cornerRadius = 12
+        container.layer.borderWidth = 0.5
+        container.layer.borderColor = UIColor(white: 0.18, alpha: 1).cgColor
+
+        return container
+    }
+
+    private func makeStatBlock(value: String, label: String) -> UIView {
+        let container = UIView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+
+        let valueLabel = UILabel()
+        valueLabel.text = value
+        valueLabel.font = UIFont.monospacedDigitSystemFont(ofSize: 28, weight: .bold)
+        valueLabel.textColor = .white
+        valueLabel.textAlignment = .center
+        valueLabel.tag = label.hashValue  // for updating later
+
+        let descLabel = UILabel()
+        descLabel.text = label.uppercased()
+        descLabel.font = UIFont.systemFont(ofSize: 9, weight: .semibold)
+        descLabel.textColor = dimText
+        descLabel.textAlignment = .center
+
+        let stack = UIStackView(arrangedSubviews: [valueLabel, descLabel])
+        stack.axis = .vertical
+        stack.spacing = 2
+        stack.alignment = .center
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        container.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 12),
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -12),
+        ])
+
+        return container
+    }
+
+    private var sealsStatLabel: UILabel?
+    private var keystrokesStatLabel: UILabel?
+
     // MARK: - UI Setup
 
     private func setupUI() {
@@ -461,234 +576,411 @@ class MainViewController: UIViewController {
 
         // Content stack
         contentStack.axis = .vertical
-        contentStack.spacing = 24
+        contentStack.spacing = 16
         contentStack.alignment = .fill
         contentStack.translatesAutoresizingMaskIntoConstraints = false
         scrollView.addSubview(contentStack)
         NSLayoutConstraint.activate([
-            contentStack.topAnchor.constraint(equalTo: scrollView.topAnchor, constant: 32),
-            contentStack.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor, constant: 24),
-            contentStack.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor, constant: -24),
+            contentStack.topAnchor.constraint(equalTo: scrollView.topAnchor, constant: 16),
+            contentStack.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor, constant: 20),
+            contentStack.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor, constant: -20),
             contentStack.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor, constant: -32),
-            contentStack.widthAnchor.constraint(equalTo: scrollView.widthAnchor, constant: -48)
+            contentStack.widthAnchor.constraint(equalTo: scrollView.widthAnchor, constant: -40)
         ])
 
-        // Title
-        titleLabel.text = "KeyWitness"
-        titleLabel.font = UIFont.systemFont(ofSize: 34, weight: .bold)
-        titleLabel.textColor = .white
-        titleLabel.textAlignment = .center
-        contentStack.addArrangedSubview(titleLabel)
+        // ── Header ──────────────────────────────────────────────
+        setupHeader()
 
-        // Subtitle
-        subtitleLabel.text = "Proof you're human. Not AI."
-        subtitleLabel.font = UIFont.systemFont(ofSize: 17, weight: .regular)
-        subtitleLabel.textColor = UIColor.lightGray
-        subtitleLabel.textAlignment = .center
-        contentStack.addArrangedSubview(subtitleLabel)
+        // ── Status Pills ────────────────────────────────────────
+        setupStatusPills()
 
-        // Biometric status (hidden by default)
-        biometricStatusLabel.font = UIFont.systemFont(ofSize: 15, weight: .medium)
+        // ── Biometric status (hidden by default) ────────────────
+        biometricStatusLabel.font = UIFont.systemFont(ofSize: 14, weight: .semibold)
         biometricStatusLabel.textAlignment = .center
         biometricStatusLabel.numberOfLines = 0
         biometricStatusLabel.isHidden = true
         contentStack.addArrangedSubview(biometricStatusLabel)
 
-        // Instructions card
-        setupInstructionsCard()
+        // ── Identity Card ───────────────────────────────────────
+        setupIdentityCard()
 
-        // Public key section
-        setupPublicKeySection()
+        // ── Stats Row ───────────────────────────────────────────
+        setupStatsRow()
 
-        // BLE section
+        // ── Compose Card ────────────────────────────────────────
+        setupComposeCard()
+
+        // ── BLE Card ────────────────────────────────────────────
         setupBLECard()
 
-        // Test field section
-        setupTestField()
+        // ── Settings Card ───────────────────────────────────────
+        setupSettingsCard()
+
+        // ── Footer ──────────────────────────────────────────────
+        setupFooter()
     }
 
-    private func setupInstructionsCard() {
-        instructionsCard.backgroundColor = cardColor
-        instructionsCard.layer.cornerRadius = 12
-        instructionsCard.translatesAutoresizingMaskIntoConstraints = false
-        contentStack.addArrangedSubview(instructionsCard)
+    private func setupHeader() {
+        let container = UIView()
+        container.translatesAutoresizingMaskIntoConstraints = false
 
-        let header = UILabel()
-        header.text = "How to Use"
-        header.font = UIFont.systemFont(ofSize: 20, weight: .semibold)
-        header.textColor = .white
+        // Fingerprint icon
+        let icon = UIImageView(image: UIImage(systemName: "checkmark.seal.fill"))
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.tintColor = greenGlow
+        icon.contentMode = .scaleAspectFit
 
-        instructionsLabel.numberOfLines = 0
-        instructionsLabel.font = UIFont.systemFont(ofSize: 15, weight: .regular)
-        instructionsLabel.textColor = UIColor.lightGray
-        instructionsLabel.text = """
-        1. Go to Settings > General > Keyboard > Keyboards
-        2. Tap "Add New Keyboard..." and pick KeyWitness
-        3. Turn on "Allow Full Access" (needed to save your proof)
-        4. In any app, switch to the KeyWitness keyboard
-        5. Type your message, then tap "Seal" to prove you wrote it
+        titleLabel.text = "KeyWitness"
+        titleLabel.font = UIFont.systemFont(ofSize: 28, weight: .bold)
+        titleLabel.textColor = .white
 
-        A link will appear — anyone who opens it can see that a real person typed this message, not an AI.
-        """
+        let titleRow = UIStackView(arrangedSubviews: [icon, titleLabel])
+        titleRow.axis = .horizontal
+        titleRow.spacing = 8
+        titleRow.alignment = .center
+        titleRow.translatesAutoresizingMaskIntoConstraints = false
 
-        let stack = UIStackView(arrangedSubviews: [header, instructionsLabel])
+        subtitleLabel.text = "Cryptographic proof of human input"
+        subtitleLabel.font = UIFont.systemFont(ofSize: 13, weight: .regular)
+        subtitleLabel.textColor = dimText
+        subtitleLabel.textAlignment = .center
+
+        let stack = UIStackView(arrangedSubviews: [titleRow, subtitleLabel])
         stack.axis = .vertical
-        stack.spacing = 12
+        stack.spacing = 4
+        stack.alignment = .center
         stack.translatesAutoresizingMaskIntoConstraints = false
-        instructionsCard.addSubview(stack)
+
+        container.addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: instructionsCard.topAnchor, constant: 16),
-            stack.leadingAnchor.constraint(equalTo: instructionsCard.leadingAnchor, constant: 16),
-            stack.trailingAnchor.constraint(equalTo: instructionsCard.trailingAnchor, constant: -16),
-            stack.bottomAnchor.constraint(equalTo: instructionsCard.bottomAnchor, constant: -16)
+            icon.widthAnchor.constraint(equalToConstant: 24),
+            icon.heightAnchor.constraint(equalToConstant: 24),
+            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
+            stack.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
         ])
+
+        contentStack.addArrangedSubview(container)
     }
 
-    private func setupPublicKeySection() {
-        let card = UIView()
-        card.backgroundColor = cardColor
-        card.layer.cornerRadius = 12
-        card.translatesAutoresizingMaskIntoConstraints = false
+    private func setupStatusPills() {
+        let keyboardEnabled = isKeyboardEnabled()
+        let faceIdAvailable = LAContext().canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil)
+        let appAttestSupported = AppAttestManager.shared.isSupported
+
+        let pills = UIStackView(arrangedSubviews: [
+            makeStatusPill(icon: "keyboard", label: "Keyboard", active: keyboardEnabled),
+            makeStatusPill(icon: "faceid", label: "Face ID", active: faceIdAvailable),
+            makeStatusPill(icon: "checkmark.shield", label: "Device", active: appAttestSupported),
+        ])
+        pills.axis = .horizontal
+        pills.spacing = 6
+        pills.distribution = .fillEqually
+        contentStack.addArrangedSubview(pills)
+    }
+
+    private func isKeyboardEnabled() -> Bool {
+        let modes = UITextInputMode.activeInputModes
+        return modes.contains { mode in
+            guard let id = mode.value(forKey: "identifier") as? String else { return false }
+            return id.contains("io.keywitness")
+        }
+    }
+
+    private func setupIdentityCard() {
+        let card = makeCard()
         contentStack.addArrangedSubview(card)
 
-        publicKeyHeader.text = "Your Identity"
-        publicKeyHeader.font = UIFont.systemFont(ofSize: 20, weight: .semibold)
-        publicKeyHeader.textColor = .white
+        let sectionLabel = makeSectionLabel("Your Identity")
 
-        publicKeyLabel.numberOfLines = 0
-        publicKeyLabel.font = UIFont.monospacedSystemFont(ofSize: 13, weight: .regular)
-        publicKeyLabel.textColor = accentColor
+        // Username (large, prominent)
+        usernameStatusLabel.font = UIFont.systemFont(ofSize: 22, weight: .bold)
+        usernameStatusLabel.textColor = .white
+        usernameStatusLabel.textAlignment = .left
+        usernameStatusLabel.numberOfLines = 1
+        usernameStatusLabel.isHidden = true
+
+        // DID key
+        publicKeyHeader.isHidden = true // not needed in new design
+        publicKeyLabel.numberOfLines = 1
+        publicKeyLabel.lineBreakMode = .byTruncatingMiddle
+        publicKeyLabel.font = UIFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        publicKeyLabel.textColor = dimText
         publicKeyLabel.text = "Loading..."
-        publicKeyLabel.textAlignment = .center
 
-        copyKeyButton.setTitle("Copy ID", for: .normal)
-        copyKeyButton.titleLabel?.font = UIFont.systemFont(ofSize: 15, weight: .medium)
+        // Action buttons row
+        copyKeyButton.setTitle("Copy", for: .normal)
+        copyKeyButton.titleLabel?.font = UIFont.systemFont(ofSize: 13, weight: .semibold)
         copyKeyButton.tintColor = accentColor
         copyKeyButton.addTarget(self, action: #selector(copyPublicKey), for: .touchUpInside)
 
-        // Show claimed username or claim button
-        usernameStatusLabel.font = UIFont.systemFont(ofSize: 15, weight: .medium)
-        usernameStatusLabel.textColor = .systemGreen
-        usernameStatusLabel.textAlignment = .center
-        usernameStatusLabel.numberOfLines = 0
-        usernameStatusLabel.isHidden = true
-
         registerKeyButton.setTitle("Claim Username", for: .normal)
-        registerKeyButton.titleLabel?.font = UIFont.systemFont(ofSize: 15, weight: .medium)
+        registerKeyButton.titleLabel?.font = UIFont.systemFont(ofSize: 13, weight: .semibold)
         registerKeyButton.tintColor = accentColor
         registerKeyButton.addTarget(self, action: #selector(claimUsername), for: .touchUpInside)
 
-        let description = UILabel()
-        description.text = "Claim a username to get short links like typed.by/you/1"
-        description.font = UIFont.systemFont(ofSize: 13, weight: .regular)
-        description.textColor = UIColor.lightGray
-        description.textAlignment = .center
-        description.numberOfLines = 0
-
-        // Recover username button (for new devices)
-        recoverButton.setTitle("Recover Username", for: .normal)
-        recoverButton.titleLabel?.font = UIFont.systemFont(ofSize: 14, weight: .medium)
+        recoverButton.setTitle("Recover", for: .normal)
+        recoverButton.titleLabel?.font = UIFont.systemFont(ofSize: 13, weight: .semibold)
         recoverButton.tintColor = .systemOrange
         recoverButton.addTarget(self, action: #selector(recoverUsername), for: .touchUpInside)
 
+        let separator = UIView()
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        separator.backgroundColor = UIColor(white: 1, alpha: 0.06)
+        separator.heightAnchor.constraint(equalToConstant: 0.5).isActive = true
+
+        let buttonsRow = UIStackView(arrangedSubviews: [copyKeyButton, registerKeyButton, recoverButton])
+        buttonsRow.axis = .horizontal
+        buttonsRow.spacing = 16
+        buttonsRow.distribution = .fillEqually
+
+        let stack = UIStackView(arrangedSubviews: [sectionLabel, usernameStatusLabel, publicKeyLabel, separator, buttonsRow])
+        stack.axis = .vertical
+        stack.spacing = 8
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 16),
+            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
+            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
+            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -14),
+        ])
+
+        loadUsername()
+    }
+
+    private func setupStatsRow() {
+        let defaults = UserDefaults(suiteName: "group.io.keywitness")
+        let sealsCount = defaults?.integer(forKey: "sealCount") ?? 0
+        let keystrokeCount = defaults?.integer(forKey: "keystrokeCount") ?? 0
+
+        let card = makeCard()
+        contentStack.addArrangedSubview(card)
+
+        let sealsBlock = makeStatBlock(value: "\(sealsCount)", label: "Seals")
+        let keystrokesBlock = makeStatBlock(value: "\(keystrokeCount)", label: "Keystrokes")
+
+        // Vertical divider
+        let divider = UIView()
+        divider.translatesAutoresizingMaskIntoConstraints = false
+        divider.backgroundColor = UIColor(white: 1, alpha: 0.06)
+        divider.widthAnchor.constraint(equalToConstant: 0.5).isActive = true
+
+        let row = UIStackView(arrangedSubviews: [sealsBlock, divider, keystrokesBlock])
+        row.axis = .horizontal
+        row.distribution = .fillEqually
+        row.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(row)
+        NSLayoutConstraint.activate([
+            row.topAnchor.constraint(equalTo: card.topAnchor),
+            row.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            row.bottomAnchor.constraint(equalTo: card.bottomAnchor),
+            divider.heightAnchor.constraint(equalTo: row.heightAnchor, multiplier: 0.5),
+            divider.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+        ])
+
+        // Store references for updating
+        sealsStatLabel = sealsBlock.subviews.first?.subviews.first { $0 is UIStackView }?.subviews.first as? UILabel
+        keystrokesStatLabel = keystrokesBlock.subviews.first?.subviews.first { $0 is UIStackView }?.subviews.first as? UILabel
+
+        // Find the labels more reliably
+        func findValueLabel(in view: UIView) -> UILabel? {
+            for sub in view.subviews {
+                if let label = sub as? UILabel, label.font.pointSize >= 28 { return label }
+                if let found = findValueLabel(in: sub) { return found }
+            }
+            return nil
+        }
+        sealsStatLabel = findValueLabel(in: sealsBlock)
+        keystrokesStatLabel = findValueLabel(in: keystrokesBlock)
+    }
+
+    private func setupComposeCard() {
+        let card = makeCard()
+        contentStack.addArrangedSubview(card)
+
+        let sectionLabel = makeSectionLabel("Compose")
+
+        testHeader.text = "Type something and seal it"
+        testHeader.font = UIFont.systemFont(ofSize: 15, weight: .regular)
+        testHeader.textColor = UIColor(white: 0.55, alpha: 1)
+
+        testTextView.font = UIFont.systemFont(ofSize: 16)
+        testTextView.textColor = .white
+        testTextView.backgroundColor = fieldBg
+        testTextView.layer.cornerRadius = 12
+        testTextView.layer.borderWidth = 0.5
+        testTextView.layer.borderColor = UIColor(white: 0.16, alpha: 1).cgColor
+        testTextView.textContainerInset = UIEdgeInsets(top: 14, left: 12, bottom: 14, right: 12)
+        testTextView.isScrollEnabled = true
+        testTextView.text = "Switch to KeyWitness keyboard and start typing..."
+        testTextView.textColor = dimText
+        testTextView.delegate = self
+        testTextView.heightAnchor.constraint(greaterThanOrEqualToConstant: 140).isActive = true
+
+        // Alternative attestation buttons
+        let voiceButton = UIButton(type: .system)
+        voiceButton.setTitle(" Voice", for: .normal)
+        voiceButton.setImage(UIImage(systemName: "waveform"), for: .normal)
+        voiceButton.tintColor = UIColor(white: 0.65, alpha: 1)
+        voiceButton.titleLabel?.font = .systemFont(ofSize: 13, weight: .semibold)
+        voiceButton.backgroundColor = UIColor(white: 0.10, alpha: 1)
+        voiceButton.layer.cornerRadius = 10
+        voiceButton.layer.borderWidth = 0.5
+        voiceButton.layer.borderColor = UIColor(white: 0.18, alpha: 1).cgColor
+        voiceButton.contentEdgeInsets = UIEdgeInsets(top: 10, left: 14, bottom: 10, right: 14)
+        voiceButton.addTarget(self, action: #selector(voiceButtonTapped), for: .touchUpInside)
+
+        let photoButton = UIButton(type: .system)
+        photoButton.setTitle(" Photo", for: .normal)
+        photoButton.setImage(UIImage(systemName: "camera"), for: .normal)
+        photoButton.tintColor = UIColor(white: 0.65, alpha: 1)
+        photoButton.titleLabel?.font = .systemFont(ofSize: 13, weight: .semibold)
+        photoButton.backgroundColor = UIColor(white: 0.10, alpha: 1)
+        photoButton.layer.cornerRadius = 10
+        photoButton.layer.borderWidth = 0.5
+        photoButton.layer.borderColor = UIColor(white: 0.18, alpha: 1).cgColor
+        photoButton.contentEdgeInsets = UIEdgeInsets(top: 10, left: 14, bottom: 10, right: 14)
+        photoButton.addTarget(self, action: #selector(photoButtonTapped), for: .touchUpInside)
+
+        let orLabel = UILabel()
+        orLabel.text = "or attest with"
+        orLabel.font = UIFont.systemFont(ofSize: 11, weight: .regular)
+        orLabel.textColor = dimText
+
+        let altRow = UIStackView(arrangedSubviews: [orLabel, voiceButton, photoButton])
+        altRow.axis = .horizontal
+        altRow.spacing = 8
+        altRow.alignment = .center
+
+        let stack = UIStackView(arrangedSubviews: [sectionLabel, testHeader, testTextView, altRow])
+        stack.axis = .vertical
+        stack.spacing = 10
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 16),
+            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
+            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
+            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -16),
+        ])
+    }
+
+    private func setupInstructionsCard() {
+        // Collapsed by default — just a hint for new users
+        instructionsCard.backgroundColor = cardColor
+        instructionsCard.layer.cornerRadius = 16
+        instructionsCard.layer.borderWidth = 0.5
+        instructionsCard.layer.borderColor = cardBorder.cgColor
+        instructionsCard.translatesAutoresizingMaskIntoConstraints = false
+        // Only show if keyboard isn't enabled yet
+        if !isKeyboardEnabled() {
+            contentStack.addArrangedSubview(instructionsCard)
+        }
+
+        let header = UILabel()
+        header.text = "Setup Required"
+        header.font = UIFont.systemFont(ofSize: 13, weight: .semibold)
+        header.textColor = .systemOrange
+
+        instructionsLabel.numberOfLines = 0
+        instructionsLabel.font = UIFont.systemFont(ofSize: 13, weight: .regular)
+        instructionsLabel.textColor = UIColor(white: 0.55, alpha: 1)
+        instructionsLabel.text = "Settings → General → Keyboard → Keyboards → Add New Keyboard → KeyWitness → Allow Full Access"
+
+        let openSettings = UIButton(type: .system)
+        openSettings.setTitle("Open Settings", for: .normal)
+        openSettings.titleLabel?.font = UIFont.systemFont(ofSize: 13, weight: .semibold)
+        openSettings.tintColor = accentColor
+        openSettings.addTarget(self, action: #selector(openSettingsTapped), for: .touchUpInside)
+
+        let stack = UIStackView(arrangedSubviews: [header, instructionsLabel, openSettings])
+        stack.axis = .vertical
+        stack.spacing = 8
+        stack.alignment = .leading
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        instructionsCard.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: instructionsCard.topAnchor, constant: 14),
+            stack.leadingAnchor.constraint(equalTo: instructionsCard.leadingAnchor, constant: 16),
+            stack.trailingAnchor.constraint(equalTo: instructionsCard.trailingAnchor, constant: -16),
+            stack.bottomAnchor.constraint(equalTo: instructionsCard.bottomAnchor, constant: -14)
+        ])
+    }
+
+    @objc private func openSettingsTapped() {
+        if let url = URL(string: UIApplication.openSettingsURLString) {
+            UIApplication.shared.open(url)
+        }
+    }
+
+    private func setupPublicKeySection() {
+        // No longer used — identity is in setupIdentityCard
+    }
+
+    private func setupTestField() {
+        // No longer used — compose is in setupComposeCard
+    }
+
+    private func setupSettingsCard() {
+        let card = makeCard()
+        contentStack.addArrangedSubview(card)
+
+        let sectionLabel = makeSectionLabel("Settings")
+
         // Emoji toggle row
+        let emojiIcon = UIImageView(image: UIImage(systemName: "face.smiling"))
+        emojiIcon.translatesAutoresizingMaskIntoConstraints = false
+        emojiIcon.tintColor = UIColor(white: 0.55, alpha: 1)
+        emojiIcon.contentMode = .scaleAspectFit
+        emojiIcon.widthAnchor.constraint(equalToConstant: 18).isActive = true
+        emojiIcon.heightAnchor.constraint(equalToConstant: 18).isActive = true
+
         let emojiLabel = UILabel()
         emojiLabel.text = "Emoji Links"
         emojiLabel.font = UIFont.systemFont(ofSize: 15, weight: .medium)
         emojiLabel.textColor = .white
+
+        let emojiDesc = UILabel()
+        emojiDesc.text = "Encode keys as emoji instead of base64"
+        emojiDesc.font = UIFont.systemFont(ofSize: 11, weight: .regular)
+        emojiDesc.textColor = dimText
+
+        let labelStack = UIStackView(arrangedSubviews: [emojiLabel, emojiDesc])
+        labelStack.axis = .vertical
+        labelStack.spacing = 2
 
         let defaults = UserDefaults(suiteName: "group.io.keywitness")
         emojiToggle.isOn = defaults?.bool(forKey: "useEmojiLinks") ?? false
         emojiToggle.onTintColor = accentColor
         emojiToggle.addTarget(self, action: #selector(emojiToggleChanged), for: .valueChanged)
 
-        let emojiRow = UIStackView(arrangedSubviews: [emojiLabel, emojiToggle])
+        let emojiRow = UIStackView(arrangedSubviews: [emojiIcon, labelStack, emojiToggle])
         emojiRow.axis = .horizontal
+        emojiRow.spacing = 10
         emojiRow.alignment = .center
 
-        let emojiDescription = UILabel()
-        emojiDescription.text = "Use emoji in seal links instead of base64. Some apps may break emoji URLs."
-        emojiDescription.font = UIFont.systemFont(ofSize: 12, weight: .regular)
-        emojiDescription.textColor = UIColor.darkGray
-        emojiDescription.numberOfLines = 0
-
-        let stack = UIStackView(arrangedSubviews: [publicKeyHeader, usernameStatusLabel, publicKeyLabel, copyKeyButton, registerKeyButton, recoverButton, description, emojiRow, emojiDescription])
+        let stack = UIStackView(arrangedSubviews: [sectionLabel, emojiRow])
         stack.axis = .vertical
         stack.spacing = 12
-        stack.alignment = .center
         stack.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 16),
+            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 14),
             stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
             stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
-            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -16)
+            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -14),
         ])
-
-        // Check if username already claimed
-        loadUsername()
     }
 
-    private func setupTestField() {
-        let card = UIView()
-        card.backgroundColor = cardColor
-        card.layer.cornerRadius = 12
-        card.translatesAutoresizingMaskIntoConstraints = false
-        contentStack.addArrangedSubview(card)
-
-        testHeader.text = "Try It"
-        testHeader.font = UIFont.systemFont(ofSize: 20, weight: .semibold)
-        testHeader.textColor = .white
-
-        testTextView.font = UIFont.systemFont(ofSize: 15)
-        testTextView.textColor = .white
-        testTextView.backgroundColor = UIColor(red: 0.18, green: 0.18, blue: 0.20, alpha: 1.0)
-        testTextView.layer.cornerRadius = 8
-        testTextView.textContainerInset = UIEdgeInsets(top: 12, left: 8, bottom: 12, right: 8)
-        testTextView.isScrollEnabled = true
-        testTextView.text = "Tap here, switch to KeyWitness keyboard, and type something..."
-        testTextView.textColor = .gray
-        testTextView.delegate = self
-        testTextView.heightAnchor.constraint(greaterThanOrEqualToConstant: 150).isActive = true
-
-        // Voice attestation button
-        let voiceButton = UIButton(type: .system)
-        voiceButton.setTitle("  Speak Instead", for: .normal)
-        voiceButton.setImage(UIImage(systemName: "waveform.circle.fill"), for: .normal)
-        voiceButton.tintColor = accentColor
-        voiceButton.titleLabel?.font = .systemFont(ofSize: 15, weight: .semibold)
-        voiceButton.backgroundColor = accentColor.withAlphaComponent(0.15)
-        voiceButton.layer.cornerRadius = 10
-        voiceButton.contentEdgeInsets = UIEdgeInsets(top: 12, left: 16, bottom: 12, right: 16)
-        voiceButton.addTarget(self, action: #selector(voiceButtonTapped), for: .touchUpInside)
-
-        // Photo attestation button
-        let photoButton = UIButton(type: .system)
-        photoButton.setTitle("  Snap Instead", for: .normal)
-        photoButton.setImage(UIImage(systemName: "camera.circle.fill"), for: .normal)
-        photoButton.tintColor = accentColor
-        photoButton.titleLabel?.font = .systemFont(ofSize: 15, weight: .semibold)
-        photoButton.backgroundColor = accentColor.withAlphaComponent(0.15)
-        photoButton.layer.cornerRadius = 10
-        photoButton.contentEdgeInsets = UIEdgeInsets(top: 12, left: 16, bottom: 12, right: 16)
-        photoButton.addTarget(self, action: #selector(photoButtonTapped), for: .touchUpInside)
-
-        let attestButtons = UIStackView(arrangedSubviews: [voiceButton, photoButton])
-        attestButtons.axis = .horizontal
-        attestButtons.spacing = 10
-        attestButtons.distribution = .fillEqually
-
-        let stack = UIStackView(arrangedSubviews: [testHeader, testTextView, attestButtons])
-        stack.axis = .vertical
-        stack.spacing = 12
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        card.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 16),
-            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
-            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
-            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -16)
-        ])
+    private func setupFooter() {
+        let footer = UILabel()
+        footer.text = "keywitness.io — open source, open standards"
+        footer.font = UIFont.systemFont(ofSize: 11, weight: .regular)
+        footer.textColor = UIColor(white: 0.25, alpha: 1)
+        footer.textAlignment = .center
+        contentStack.addArrangedSubview(footer)
     }
 
     // MARK: - Public Key
@@ -727,9 +1019,9 @@ class MainViewController: UIViewController {
     private func loadUsername() {
         let defaults = UserDefaults(suiteName: "group.io.keywitness")
         if let username = defaults?.string(forKey: "claimedUsername") {
-            usernameStatusLabel.text = "typed.by/\(username)"
+            usernameStatusLabel.text = username
             usernameStatusLabel.isHidden = false
-            registerKeyButton.setTitle("Change Username", for: .normal)
+            registerKeyButton.setTitle("Change", for: .normal)
         }
     }
 
@@ -824,9 +1116,9 @@ class MainViewController: UIViewController {
                     // Also register the display name for backwards compat
                     self.doRegisterName(publicKey: publicKey, name: username)
 
-                    self.usernameStatusLabel.text = "typed.by/\(username)"
+                    self.usernameStatusLabel.text = username
                     self.usernameStatusLabel.isHidden = false
-                    self.registerKeyButton.setTitle("Change Username", for: .normal)
+                    self.registerKeyButton.setTitle("Change", for: .normal)
                     self.registerKeyButton.tintColor = self.accentColor
                 } else {
                     var errorMsg = "Failed"
@@ -863,55 +1155,58 @@ class MainViewController: UIViewController {
     // MARK: - BLE Card
 
     private func setupBLECard() {
-        let card = UIView()
-        card.backgroundColor = cardColor
-        card.layer.cornerRadius = 12
-        card.translatesAutoresizingMaskIntoConstraints = false
+        let card = makeCard()
         contentStack.addArrangedSubview(card)
 
-        let header = UILabel()
-        header.text = "Web Attestation (BLE)"
-        header.font = UIFont.systemFont(ofSize: 20, weight: .semibold)
-        header.textColor = .white
+        let sectionLabel = makeSectionLabel("Web Attestation")
 
-        let description = UILabel()
-        description.text = "Enable to let web browsers connect via Bluetooth and attest text you type on any website."
-        description.font = UIFont.systemFont(ofSize: 14, weight: .regular)
-        description.textColor = .lightGray
-        description.numberOfLines = 0
+        let bleIcon = UIImageView(image: UIImage(systemName: "antenna.radiowaves.left.and.right"))
+        bleIcon.translatesAutoresizingMaskIntoConstraints = false
+        bleIcon.tintColor = UIColor(white: 0.55, alpha: 1)
+        bleIcon.contentMode = .scaleAspectFit
+        bleIcon.widthAnchor.constraint(equalToConstant: 18).isActive = true
+        bleIcon.heightAnchor.constraint(equalToConstant: 18).isActive = true
 
-        // Toggle row
         let toggleLabel = UILabel()
-        toggleLabel.text = "BLE Advertising"
+        toggleLabel.text = "Bluetooth"
         toggleLabel.font = UIFont.systemFont(ofSize: 15, weight: .medium)
         toggleLabel.textColor = .white
+
+        let toggleDesc = UILabel()
+        toggleDesc.text = "Attest text typed in web browsers"
+        toggleDesc.font = UIFont.systemFont(ofSize: 11, weight: .regular)
+        toggleDesc.textColor = dimText
+
+        let labelStack = UIStackView(arrangedSubviews: [toggleLabel, toggleDesc])
+        labelStack.axis = .vertical
+        labelStack.spacing = 2
 
         bleToggle.onTintColor = accentColor
         bleToggle.addTarget(self, action: #selector(bleToggleChanged), for: .valueChanged)
 
-        let toggleRow = UIStackView(arrangedSubviews: [toggleLabel, bleToggle])
+        let toggleRow = UIStackView(arrangedSubviews: [bleIcon, labelStack, bleToggle])
         toggleRow.axis = .horizontal
+        toggleRow.spacing = 10
         toggleRow.alignment = .center
 
-        // Status
-        bleStatusLabel.font = UIFont.systemFont(ofSize: 14, weight: .medium)
-        bleStatusLabel.textColor = .lightGray
+        bleStatusLabel.font = UIFont.systemFont(ofSize: 12, weight: .medium)
+        bleStatusLabel.textColor = dimText
         bleStatusLabel.text = "Off"
 
-        bleKeystrokeCount.font = UIFont.monospacedDigitSystemFont(ofSize: 14, weight: .regular)
+        bleKeystrokeCount.font = UIFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular)
         bleKeystrokeCount.textColor = accentColor
         bleKeystrokeCount.isHidden = true
 
-        let stack = UIStackView(arrangedSubviews: [header, description, toggleRow, bleStatusLabel, bleKeystrokeCount])
+        let stack = UIStackView(arrangedSubviews: [sectionLabel, toggleRow, bleStatusLabel, bleKeystrokeCount])
         stack.axis = .vertical
-        stack.spacing = 12
+        stack.spacing = 10
         stack.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 16),
+            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 14),
             stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
             stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
-            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -16)
+            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -14)
         ])
     }
 
@@ -1099,9 +1394,9 @@ class MainViewController: UIViewController {
                     let defaults = UserDefaults(suiteName: "group.io.keywitness")
                     defaults?.set(username, forKey: "claimedUsername")
                     self.doRegisterName(publicKey: publicKey, name: username)
-                    self.usernameStatusLabel.text = "typed.by/\(username)"
+                    self.usernameStatusLabel.text = username
                     self.usernameStatusLabel.isHidden = false
-                    self.registerKeyButton.setTitle("Change Username", for: .normal)
+                    self.registerKeyButton.setTitle("Change", for: .normal)
                     self.recoverButton.setTitle("Recovered!", for: .normal)
                     self.recoverButton.tintColor = .systemGreen
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
@@ -1145,7 +1440,7 @@ extension MainViewController: UITextViewDelegate {
 
     func textViewDidEndEditing(_ textView: UITextView) {
         if textView.text.isEmpty {
-            textView.text = "Tap here, switch to KeyWitness keyboard, and type something..."
+            textView.text = "Switch to KeyWitness keyboard and start typing..."
             textView.textColor = .gray
         }
     }
