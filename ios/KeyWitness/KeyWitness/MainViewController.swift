@@ -610,6 +610,9 @@ class MainViewController: UIViewController {
         // ── Compose Card ────────────────────────────────────────
         setupComposeCard()
 
+        // ── How It Works ────────────────────────────────────────
+        setupHowItWorksCard()
+
         // ── BLE Card ────────────────────────────────────────────
         setupBLECard()
 
