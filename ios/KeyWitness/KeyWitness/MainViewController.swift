@@ -977,7 +977,15 @@ class MainViewController: UIViewController {
             itemsStack.addArrangedSubview(row)
         }
 
-        let stack = UIStackView(arrangedSubviews: [sectionLabel, itemsStack])
+        // Learn More button
+        let learnMore = UIButton(type: .system)
+        learnMore.setTitle("Learn more →", for: .normal)
+        learnMore.titleLabel?.font = .systemFont(ofSize: 12, weight: .medium)
+        learnMore.tintColor = accentColor
+        learnMore.contentHorizontalAlignment = .leading
+        learnMore.addTarget(self, action: #selector(learnMoreTapped), for: .touchUpInside)
+
+        let stack = UIStackView(arrangedSubviews: [sectionLabel, itemsStack, learnMore])
         stack.axis = .vertical
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -988,6 +996,12 @@ class MainViewController: UIViewController {
             stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
             stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -14),
         ])
+    }
+
+    @objc private func learnMoreTapped() {
+        let vc = LearnMoreViewController()
+        vc.modalPresentationStyle = .fullScreen
+        present(vc, animated: true)
     }
 
     private func setupSettingsCard() {
