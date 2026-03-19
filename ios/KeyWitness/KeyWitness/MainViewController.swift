@@ -926,6 +926,213 @@ class MainViewController: UIViewController {
         // No longer used — compose is in setupComposeCard
     }
 
+    private func setupHowItWorksCard() {
+        let card = makeCard()
+        contentStack.addArrangedSubview(card)
+
+        let sectionLabel = makeSectionLabel("How It Works")
+
+        // ── Step-by-step trust chain ────────────────────────────
+
+        let steps: [(icon: String, title: String, body: String, color: UIColor)] = [
+            ("keyboard.fill",
+             "1. You type",
+             "The KeyWitness keyboard captures your unique typing rhythm — timing, finger position, pressure, contact radius. This biometric data is hashed into the seal.",
+             accentColor),
+
+            ("lock.fill",
+             "2. You seal",
+             "Tap Seal. The keyboard builds a W3C Verifiable Credential — an open-standard cryptographic proof — and signs it with an Ed25519 key locked in your device's Secure Enclave. The private key never leaves the chip.",
+             accentColor),
+
+            ("checkmark.shield.fill",
+             "3. Apple verifies the device",
+             "App Attest proves this is a real, unmodified iPhone running the genuine KeyWitness app. Not a simulator. Not jailbroken. Not a script.",
+             greenGlow),
+
+            ("faceid",
+             "4. Face ID confirms the owner",
+             "Optional but powerful: Face ID proves the person whose face unlocks this phone saw the exact message and approved it. This happens in the app, seconds after sealing.",
+             greenGlow),
+
+            ("lock.shield.fill",
+             "5. Encrypted upload",
+             "Your text is encrypted with AES-256-GCM on-device. The encryption key is encoded as emoji in the URL fragment — the server never sees it. We store a blob we cannot read.",
+             UIColor(red: 0.65, green: 0.45, blue: 1.0, alpha: 1.0)),
+
+            ("link",
+             "6. Anyone can verify",
+             "Open the link in any browser. The verification page checks every signature, every hash, every proof — client-side, with no server trust required. If we disappeared tomorrow, your seals would still verify.",
+             UIColor(red: 0.65, green: 0.45, blue: 1.0, alpha: 1.0)),
+        ]
+
+        let stepsStack = UIStackView()
+        stepsStack.axis = .vertical
+        stepsStack.spacing = 0
+
+        for (i, step) in steps.enumerated() {
+            let stepView = makeStepRow(
+                icon: step.icon,
+                title: step.title,
+                body: step.body,
+                color: step.color,
+                isLast: i == steps.count - 1
+            )
+            stepsStack.addArrangedSubview(stepView)
+        }
+
+        // ── What makes this different ───────────────────────────
+
+        let divider = UIView()
+        divider.translatesAutoresizingMaskIntoConstraints = false
+        divider.backgroundColor = UIColor(white: 1, alpha: 0.06)
+        divider.heightAnchor.constraint(equalToConstant: 0.5).isActive = true
+
+        let diffLabel = makeSectionLabel("What Makes This Different")
+
+        let diffItems: [(String, String)] = [
+            ("Proof, not detection",
+             "AI detectors are statistical guesses that degrade over time. Cryptographic proof is mathematical certainty."),
+            ("No trust required",
+             "The credential carries everything needed to verify it. No API call, no server, no account. Works offline."),
+            ("Open standards",
+             "W3C Verifiable Credentials 2.0, did:key, eddsa-jcs-2022, BitstringStatusList. Any conforming verifier works."),
+            ("Privacy by architecture",
+             "The server cannot read your text because it architecturally can't — not because we promise not to."),
+        ]
+
+        let diffStack = UIStackView()
+        diffStack.axis = .vertical
+        diffStack.spacing = 12
+
+        for (title, body) in diffItems {
+            let item = makeDiffItem(title: title, body: body)
+            diffStack.addArrangedSubview(item)
+        }
+
+        // ── Assemble ────────────────────────────────────────────
+
+        let stack = UIStackView(arrangedSubviews: [sectionLabel, stepsStack, divider, diffLabel, diffStack])
+        stack.axis = .vertical
+        stack.spacing = 16
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 16),
+            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16),
+            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
+            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -16),
+        ])
+    }
+
+    private func makeStepRow(icon: String, title: String, body: String, color: UIColor, isLast: Bool) -> UIView {
+        let container = UIView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+
+        // Dot
+        let dot = UIView()
+        dot.translatesAutoresizingMaskIntoConstraints = false
+        dot.backgroundColor = color
+        dot.layer.cornerRadius = 5
+        dot.layer.shadowColor = color.cgColor
+        dot.layer.shadowRadius = 4
+        dot.layer.shadowOpacity = 0.4
+        dot.layer.shadowOffset = .zero
+
+        // Line connecting to next dot
+        let line = UIView()
+        line.translatesAutoresizingMaskIntoConstraints = false
+        line.backgroundColor = UIColor(white: 1, alpha: 0.06)
+        line.isHidden = isLast
+
+        // Icon
+        let iconView = UIImageView(image: UIImage(systemName: icon))
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.tintColor = color.withAlphaComponent(0.7)
+        iconView.contentMode = .scaleAspectFit
+
+        // Title
+        let titleLabel = UILabel()
+        titleLabel.text = title
+        titleLabel.font = .systemFont(ofSize: 15, weight: .semibold)
+        titleLabel.textColor = .white
+
+        // Body
+        let bodyLabel = UILabel()
+        bodyLabel.text = body
+        bodyLabel.font = .systemFont(ofSize: 13, weight: .regular)
+        bodyLabel.textColor = UIColor(white: 0.55, alpha: 1)
+        bodyLabel.numberOfLines = 0
+
+        let textStack = UIStackView(arrangedSubviews: [titleLabel, bodyLabel])
+        textStack.axis = .vertical
+        textStack.spacing = 4
+        textStack.translatesAutoresizingMaskIntoConstraints = false
+
+        container.addSubview(line)
+        container.addSubview(dot)
+        container.addSubview(iconView)
+        container.addSubview(textStack)
+
+        NSLayoutConstraint.activate([
+            dot.widthAnchor.constraint(equalToConstant: 10),
+            dot.heightAnchor.constraint(equalToConstant: 10),
+            dot.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            dot.topAnchor.constraint(equalTo: container.topAnchor, constant: 5),
+
+            line.widthAnchor.constraint(equalToConstant: 1),
+            line.centerXAnchor.constraint(equalTo: dot.centerXAnchor),
+            line.topAnchor.constraint(equalTo: dot.bottomAnchor, constant: 4),
+            line.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+
+            iconView.widthAnchor.constraint(equalToConstant: 16),
+            iconView.heightAnchor.constraint(equalToConstant: 16),
+            iconView.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 10),
+            iconView.centerYAnchor.constraint(equalTo: dot.centerYAnchor),
+
+            textStack.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 8),
+            textStack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            textStack.topAnchor.constraint(equalTo: container.topAnchor),
+            textStack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -16),
+        ])
+
+        return container
+    }
+
+    private func makeDiffItem(title: String, body: String) -> UIView {
+        let container = UIView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.backgroundColor = UIColor(white: 0.08, alpha: 1)
+        container.layer.cornerRadius = 10
+        container.layer.borderWidth = 0.5
+        container.layer.borderColor = UIColor(white: 0.14, alpha: 1).cgColor
+
+        let titleLabel = UILabel()
+        titleLabel.text = title
+        titleLabel.font = .systemFont(ofSize: 14, weight: .semibold)
+        titleLabel.textColor = .white
+
+        let bodyLabel = UILabel()
+        bodyLabel.text = body
+        bodyLabel.font = .systemFont(ofSize: 12, weight: .regular)
+        bodyLabel.textColor = UIColor(white: 0.50, alpha: 1)
+        bodyLabel.numberOfLines = 0
+
+        let stack = UIStackView(arrangedSubviews: [titleLabel, bodyLabel])
+        stack.axis = .vertical
+        stack.spacing = 3
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 12),
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 14),
+            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -14),
+            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -12),
+        ])
+
+        return container
+    }
+
     private func setupSettingsCard() {
         let card = makeCard()
         contentStack.addArrangedSubview(card)
