@@ -103,6 +103,42 @@ export default function Privacy() {
           </section>
 
           <section>
+            <h2 className="text-white font-semibold text-lg mb-3">TrueDepth Face Tracking for Voice Attestation</h2>
+            <p className="mb-3">
+              Voice attestation exists for two reasons: <strong className="text-white">accessibility</strong> and{" "}
+              <strong className="text-white">preventing user spoofing</strong>. It provides an alternative
+              for users who cannot type — including those with motor impairments, repetitive strain injuries,
+              or other conditions that make keyboard input difficult or impossible. TrueDepth face tracking
+              prevents spoofing by verifying that a real person is physically speaking the words, not playing
+              back a recording or using synthetic audio.
+            </p>
+            <p className="mb-3">
+              During voice attestation, KeyWitness uses ARKit face tracking via the TrueDepth camera
+              to capture mouth movement data — specifically, 12 mouth-related blend shape coefficients
+              (such as jaw open, mouth smile, and lip movement) sampled at 20 frames per second. No full
+              3D face geometry, eye tracking, iris data, or facial feature points are collected.
+            </p>
+            <p className="mb-3">
+              <strong className="text-gray-300">Purpose:</strong> The app correlates mouth movement with
+              spoken audio entirely on your device to verify liveness — proving that a real human physically
+              spoke the words at the moment of attestation. This prevents spoofing via recording playback
+              or synthetic voice. A SHA-256 hash of the mouth movement data is included in the attestation
+              credential for integrity verification.
+            </p>
+            <p className="mb-3">
+              <strong className="text-gray-300">Encryption and storage:</strong> The mouth blend shape
+              data is encrypted with AES-256-GCM on your device before upload, alongside the audio and
+              transcription. The server stores only the encrypted blob and cannot decrypt it — the
+              decryption key lives in the URL fragment, which is never sent to the server.
+            </p>
+            <p>
+              <strong className="text-gray-300">Sharing:</strong> Face tracking data is never shared
+              with third parties. It is only accessible to someone who possesses the full verification
+              link (including the decryption key in the URL fragment).
+            </p>
+          </section>
+
+          <section>
             <h2 className="text-white font-semibold text-lg mb-3">Cryptographic Keys</h2>
             <p>
               Your Ed25519 signing key is generated in the device's Secure Enclave. The private key

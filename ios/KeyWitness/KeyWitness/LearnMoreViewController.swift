@@ -99,11 +99,11 @@ class LearnMoreViewController: UIViewController {
             color: purpleAccent,
             title: "Voice Attestation",
             items: [
+                "Accessible alternative for users who can't type",
+                "TrueDepth mouth tracking prevents spoofing by verifying liveness",
                 "Tap Speak Instead to record your voice",
                 "On-device speech recognition transcribes your words",
-                "Audio spectrograms and TrueDepth face tracking verify liveness",
-                "The transcription becomes the attested text",
-                "Proves a real human spoke these words on this device",
+                "Only mouth blend shapes are captured — no face geometry or iris data",
                 "Same cryptographic seal as typed attestations",
             ])
 
