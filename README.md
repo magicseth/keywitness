@@ -95,7 +95,7 @@ Every piece is an open standard. Any conforming W3C VC verifier can validate Key
 
 ## Get the App
 
-DM [@magicseth](https://x.com/magicseth) on X with "I'm a human" for a TestFlight invite.
+Download on the iOS [AppStore](https://apps.apple.com/us/app/keywitness/id6760276383)
 
 ## License
 
