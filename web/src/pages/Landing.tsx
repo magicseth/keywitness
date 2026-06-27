@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type ReactNode } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import Nav from "../components/Nav";
 import { Section, Stagger } from "../components/ScrollReveal";
 
@@ -145,8 +145,8 @@ export default function Landing() {
         </Section>
         <Section delay={200}>
           <p className="text-gray-500 text-lg sm:text-xl text-center max-w-lg leading-relaxed mb-12">
-            Cryptographic proof that text was typed by a real person on a real device.
-            Verifiable by anyone. No trust required.
+            An iOS keyboard that signs what you type with hardware-bound keys.
+            The seal is a W3C Verifiable Credential anyone can check.
           </p>
         </Section>
         <Section delay={400}>
@@ -163,21 +163,20 @@ export default function Landing() {
         <div className="space-y-8">
           <Section>
             <p className="text-3xl sm:text-4xl font-bold text-white tracking-tight leading-snug">
-              AI killed trust in text.
+              Text lost its credibility.
             </p>
           </Section>
           <Section>
             <p className="text-gray-400 text-lg leading-relaxed">
-              Every email, every message, every essay is suspect. AI writes better
-              prose than most people. Detection is a losing arms race — statistical
-              guesses that degrade with every model release.
+              Language models write fluent prose on demand. Detectors try to
+              guess what's human and get worse with each new model. You can't
+              detect your way out of this. You have to prove it at the source.
             </p>
           </Section>
           <Section>
             <div className="border-l-2 border-green-500/40 pl-6">
               <p className="text-2xl sm:text-3xl font-light text-white leading-snug">
-                We don't detect AI.<br />
-                We prove humanity.
+                KeyWitness proves a human was typing.
               </p>
             </div>
           </Section>
@@ -198,7 +197,7 @@ export default function Landing() {
                   number={1}
                   title="Type"
                   icon="⌨️"
-                  description="You type on the KeyWitness keyboard. It captures your unique rhythm — timing, position, pressure. A biometric fingerprint of the moment."
+                  description="The KeyWitness keyboard records each keystroke: when you pressed, when you released, where your finger landed. This proves a human was tapping glass."
                 />,
                 <Step
                   number={2}
@@ -306,7 +305,14 @@ export default function Landing() {
                 Get the iOS keyboard or verify someone else's seal.
               </p>
               <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-                <a href="https://apps.apple.com/us/app/keywitness/id6760276383">Download KeyWitness for iOS</a>
+                <a
+                  href="https://apps.apple.com/us/app/keywitness/id6760276383"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-8 py-3.5 bg-white text-black font-semibold rounded-xl hover:bg-gray-200 transition-colors text-sm"
+                >
+                  Download KeyWitness for iOS
+                </a>
                 <a
                   href="/verify"
                   className="px-8 py-3.5 bg-[#111] border border-gray-700 text-white font-semibold rounded-xl hover:border-gray-500 transition-colors text-sm"

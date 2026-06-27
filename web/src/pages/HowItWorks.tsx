@@ -16,9 +16,9 @@ export default function HowItWorks() {
                 How It Works
               </h1>
               <p className="text-gray-400 leading-relaxed">
-                You type a message. You tap Seal. The keyboard proves it was
-                you, on your phone, typing with your fingers. Then anyone can
-                check that proof — without trusting us or anyone else.
+                You type a message. You tap Seal. The keyboard signs it
+                with a key locked in your phone's hardware. Anyone can
+                check the signature without trusting us.
               </p>
             </>
           }
@@ -30,14 +30,14 @@ export default function HowItWorks() {
             <>
               <h2 className="text-white font-semibold text-lg mb-2">You type normally.</h2>
               <p>
-                KeyWitness is a keyboard. You install it, switch to it, and type
-                like you always do. While you type, the keyboard quietly records
-                how you type — the rhythm, the pauses between keys, where your
-                finger lands, how hard you press.
+                KeyWitness replaces your keyboard. While you type, it records
+                each keystroke: when you pressed, when you released, where
+                your finger landed, how hard you pressed. This data proves
+                a physical human was tapping glass, not a script generating text.
               </p>
               <p className="mt-3">
-                Nobody types the same way. Your pattern is as unique as your
-                handwriting. That's the signal.
+                The biometrics don't identify you. They prove someone was
+                physically typing.
               </p>
             </>
           }
@@ -58,14 +58,14 @@ export default function HowItWorks() {
             <>
               <h2 className="text-white font-semibold text-lg mb-2">You tap Seal.</h2>
               <p>
-                When you're done, you tap the Seal button. The keyboard takes
-                everything — your text, your typing pattern — and locks it into
-                a signed document. It's like a notarized statement: "This text
-                was typed by this device, at this time, with these fingers."
+                The keyboard hashes the keystroke data, bundles it with
+                your text, and signs the whole thing with an Ed25519 key
+                stored in the Secure Enclave. The result is a W3C
+                Verifiable Credential.
               </p>
               <p className="mt-3">
-                The signing key lives inside your phone's secure hardware. It
-                never leaves. Not even we can extract it.
+                The signing key lives in hardware. It cannot be extracted,
+                copied, or used by another app.
               </p>
             </>
           }
@@ -91,16 +91,16 @@ export default function HowItWorks() {
         <Row
           left={
             <>
-              <h2 className="text-white font-semibold text-lg mb-2">We can't read what you wrote.</h2>
+              <h2 className="text-white font-semibold text-lg mb-2">The text is encrypted on your phone.</h2>
               <p>
-                Before anything leaves your phone, the text is encrypted with a
-                random key. That key is never sent to our server. It's encoded
-                as 27 emoji and tucked into the link you share.
+                Before upload, the text is encrypted with a random 256-bit
+                AES key. That key goes into the URL fragment (the part after #),
+                which browsers never send to servers. The server stores
+                ciphertext it cannot decrypt.
               </p>
               <p className="mt-3">
-                The server stores an encrypted blob it can't decrypt. We
-                couldn't read your messages even if we wanted to. That's not a
-                policy — it's math.
+                The key is encoded as 27 human emoji so it survives
+                copy-paste across messaging apps.
               </p>
             </>
           }
@@ -120,16 +120,16 @@ export default function HowItWorks() {
         <Row
           left={
             <>
-              <h2 className="text-white font-semibold text-lg mb-2">It was a real iPhone.</h2>
+              <h2 className="text-white font-semibold text-lg mb-2">Apple verifies the device.</h2>
               <p>
-                Your iPhone has a chip that Apple locked down at the factory.
-                When KeyWitness installs, Apple certifies that this is a real,
-                unmodified phone running the real app — not a computer
-                pretending to be one.
+                App Attest generates a separate P-256 key in the Secure
+                Enclave and has Apple sign a certificate for it. This
+                certificate proves the app is running on a real, unmodified
+                iPhone.
               </p>
               <p className="mt-3">
-                So when someone sees "device verified" on your seal, it means
-                Apple vouched for the hardware.
+                "Device verified" means Apple's certificate chain checks out,
+                not just that we say so.
               </p>
             </>
           }
@@ -150,14 +150,14 @@ export default function HowItWorks() {
         <Row
           left={
             <>
-              <h2 className="text-white font-semibold text-lg mb-2">It was the same person as before.</h2>
+              <h2 className="text-white font-semibold text-lg mb-2">Same key, every time.</h2>
               <p>
-                Every message you seal is signed with the same key — your
-                device's unique identity. If someone trusted a previous seal
-                from you, they know this one came from the same phone.
+                Every seal from your device uses the same Ed25519 key.
+                If a verifier trusted one seal, they can confirm the next
+                one came from the same device.
               </p>
               <p className="mt-3">
-                Claim a username and your seals get short, memorable links:{" "}
+                Claim a username for short links:{" "}
                 <code className="text-green-400">typed.by/magicseth/1</code>,{" "}
                 <code className="text-green-400">typed.by/magicseth/2</code>,
                 and so on.
@@ -179,15 +179,14 @@ export default function HowItWorks() {
         <Row
           left={
             <>
-              <h2 className="text-white font-semibold text-lg mb-2">The owner of the phone said yes.</h2>
+              <h2 className="text-white font-semibold text-lg mb-2">Face ID confirms the owner. (Optional.)</h2>
               <p>
-                After you seal a message, your phone asks you to confirm with
-                Face ID. This is optional but powerful: it proves the person
-                whose face unlocks the phone saw this exact message and approved
-                it.
+                After sealing, the app can prompt Face ID. If it passes,
+                a second signature is added proving the person whose face
+                unlocks this phone saw the message and approved it.
               </p>
               <p className="mt-3">
-                Not just the device. The person.
+                This step is optional. Seals work without it.
               </p>
             </>
           }
@@ -206,15 +205,15 @@ export default function HowItWorks() {
         <Row
           left={
             <>
-              <h2 className="text-white font-semibold text-lg mb-2">Anyone can check. No trust required.</h2>
+              <h2 className="text-white font-semibold text-lg mb-2">Anyone can verify.</h2>
               <p>
-                Click the link. Your browser does the math. It checks every
-                signature, every hash, every proof — right there on your
-                machine. No server call. No API key. No account.
+                Open the link. The browser checks the Ed25519 signature,
+                the SHA-256 hashes, and the App Attest certificate chain.
+                All client-side. No server call, no account, no API key.
               </p>
               <p className="mt-3">
-                If KeyWitness disappeared tomorrow, every seal we ever issued
-                would still verify. That's the whole point.
+                The credential is self-contained. It would still verify
+                if our server went offline.
               </p>
             </>
           }
@@ -262,12 +261,11 @@ export default function HowItWorks() {
         <Row
           left={
             <>
-              <h2 className="text-white font-semibold text-lg mb-2">It's all open standards.</h2>
+              <h2 className="text-white font-semibold text-lg mb-2">Open standards throughout.</h2>
               <p>
-                Everything we use — the credential format, the signatures, the
-                identifiers — is a published standard anyone can implement. An
-                Android keyboard, a desktop app, or a hardware token could
-                produce seals that our verifier accepts, and vice versa.
+                The credential format, signatures, and identifiers are all
+                published standards. An Android keyboard or hardware token
+                could produce seals our verifier accepts, and vice versa.
               </p>
               <p className="mt-3">
                 Read the{" "}
