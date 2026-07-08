@@ -1,25 +1,28 @@
 /**
- * KeyWitness Teensy 4.1 — attesting keyboard passthrough.
+ * KeyWitness Teensy — attesting keyboard passthrough (no-WiFi stopgap).
  *
  * Builds on Justin's KeyboardForward.ino (same pins, same passthrough).
  *
  *   [keyboard] --USB--> [Teensy host port]     [Teensy micro-USB] --> [computer]
  *                            |                        ^
- *                       record + buffer          types URL
- *                            |
- *                       Serial1 (pins 0/1) <---> ESP32 Wi-Fi bridge
+ *                       record + buffer        types a curl command
  *
  * Flow:
  *   - Keys always pass through to the computer.
  *   - Press button: start recording (blue LED on).
- *   - Press again:  sign what was typed (Ed25519, v1 attestation), send to
- *                   the ESP32 bridge, which POSTs it to
- *                   https://www.keywitness.io/api/attestations. The returned
- *                   proof URL is typed out over HID. Green = success.
+ *   - Press again:  sign what was typed (Ed25519, v1 attestation) and type out
+ *                   a ready-to-run curl command that POSTs it to
+ *                   https://www.keywitness.io/api/attestations and prints the
+ *                   proof URL. Focus a terminal, press Enter to run it.
+ *                   Green = signed & typed.
  *   - Hold >2s while recording: discard the buffer without attesting (red).
  *
+ * This is a temporary bridge-free path until a WiFi board (e.g. Teensy +
+ * Adafruit AirLift) does the POST on-device. Then this step becomes a direct
+ * WiFiSSLClient POST and the curl typeout goes away.
+ *
  * Arduino IDE setup:
- *   - Board: Teensy 4.1, USB Type: "Serial + Keyboard + Mouse + Joystick"
+ *   - Board: Teensy 3.6 or 4.x, USB Type: "Serial + Keyboard + Mouse + Joystick"
  *   - Libraries: USBHost_t36 (bundled with Teensyduino),
  *                Crypto by Rhys Weatherley (Ed25519, SHA256),
  *                Entropy (bundled with Teensyduino)
@@ -35,6 +38,7 @@
 #include <Crypto.h>
 #include <Ed25519.h>
 #include <SHA256.h>
+#include <time.h>
 
 #include "attestation_v1.h"
 
@@ -49,8 +53,6 @@ const int green  = 22;
 
 const int buttonGround = 30;
 const int buttonActive = 32;
-
-#define BRIDGE_SERIAL Serial1  /* pins 0 (RX1) / 1 (TX1) to the ESP32 */
 
 /* --------------------------------------------------------------------- */
 /* USB host                                                               */
@@ -152,9 +154,18 @@ void loadOrGenerateKeys()
     memcpy(privKey, store.seed, 32);
     Ed25519::derivePublicKey(pubKey, privKey);
 
-    /* deviceId from the i.MX RT1062 unique ID fuses */
+    /* deviceId from the chip's unique ID.
+     * Teensy 3.5/3.6 (Kinetis K64/K66): SIM_UIDMH/SIM_UIDML/SIM_UIDL.
+     * Teensy 4.x (i.MX RT1062):          HW_OCOTP_CFG0/CFG1. */
+#if defined(__IMXRT1062__)
     snprintf(deviceId, sizeof(deviceId), "TEENSY4-%08lX%08lX",
              (unsigned long)HW_OCOTP_CFG0, (unsigned long)HW_OCOTP_CFG1);
+#elif defined(__MK66FX1M0__) || defined(__MK64FX512__)
+    snprintf(deviceId, sizeof(deviceId), "TEENSY36-%08lX%08lX",
+             (unsigned long)SIM_UIDMH, (unsigned long)SIM_UIDL);
+#else
+    snprintf(deviceId, sizeof(deviceId), "TEENSY-%08lX", (unsigned long)SIM_UIDL);
+#endif
 
     char pubB64[48];
     kw_base64url_encode(pubKey, 32, pubB64, sizeof(pubB64));
@@ -165,71 +176,24 @@ void loadOrGenerateKeys()
 }
 
 /* --------------------------------------------------------------------- */
-/* Bridge (ESP32) protocol: line-based over Serial1                       */
-/*   "TIME"          -> "TIME <iso8601>" | "ERR <reason>"                 */
-/*   "ATTEST <b64>"  -> "URL <url>"      | "ERR <reason>"                 */
+/* Timestamp                                                              */
 /* --------------------------------------------------------------------- */
 
 /**
- * Read one line from the bridge, pumping USB host events so the keyboard
- * keeps passing through while we wait.
+ * ISO 8601 UTC timestamp from the on-chip RTC.
+ *
+ * Teensyduino sets the RTC to the sketch's compile time at upload, and a coin
+ * cell on VBAT keeps it running across power cycles. If the RTC looks unset we
+ * fall back to a fixed recent date so the payload always has a valid string.
+ * (The KeyWitness server does not currently validate the timestamp value.)
  */
-bool bridgeReadLine(char *out, size_t outSize, unsigned long timeoutMs)
+static void isoTimestamp(char *out, size_t n)
 {
-    size_t len = 0;
-    unsigned long start = millis();
-
-    while (millis() - start < timeoutMs) {
-        myusb.Task();
-        while (BRIDGE_SERIAL.available()) {
-            char c = (char)BRIDGE_SERIAL.read();
-            if (c == '\r') continue;
-            if (c == '\n') {
-                out[len] = '\0';
-                if (len > 0) return true;
-                continue; /* ignore blank lines */
-            }
-            if (len + 1 < outSize) out[len++] = c;
-        }
-    }
-    out[len] = '\0';
-    return false;
-}
-
-bool bridgeGetTime(char *iso, size_t isoSize)
-{
-    /* Flush any stale bytes */
-    while (BRIDGE_SERIAL.available()) BRIDGE_SERIAL.read();
-
-    BRIDGE_SERIAL.println("TIME");
-
-    char line[128];
-    if (!bridgeReadLine(line, sizeof(line), 10000)) return false;
-    if (strncmp(line, "TIME ", 5) != 0) {
-        Serial.print("Bridge time error: ");
-        Serial.println(line);
-        return false;
-    }
-    strlcpy(iso, line + 5, isoSize);
-    return true;
-}
-
-bool bridgePostAttestation(const char *b64, char *url, size_t urlSize)
-{
-    while (BRIDGE_SERIAL.available()) BRIDGE_SERIAL.read();
-
-    BRIDGE_SERIAL.print("ATTEST ");
-    BRIDGE_SERIAL.println(b64);
-
-    char line[512];
-    if (!bridgeReadLine(line, sizeof(line), 45000)) return false;
-    if (strncmp(line, "URL ", 4) != 0) {
-        Serial.print("Bridge attest error: ");
-        Serial.println(line);
-        return false;
-    }
-    strlcpy(url, line + 4, urlSize);
-    return true;
+    time_t t = (time_t)Teensy3Clock.get();
+    if (t < 1700000000) t = 1751932800; /* ~2025-07-08 fallback if RTC unset */
+    struct tm tmv;
+    gmtime_r(&t, &tmv);
+    strftime(out, n, "%Y-%m-%dT%H:%M:%S.000Z", &tmv);
 }
 
 /* --------------------------------------------------------------------- */
@@ -272,15 +236,9 @@ void attest()
     }
     bioHash[64] = '\0';
 
-    /* 2. Get an ISO 8601 timestamp from the bridge (it runs NTP). */
+    /* 2. Timestamp from the on-chip RTC. */
     char timestamp[40];
-    if (!bridgeGetTime(timestamp, sizeof(timestamp))) {
-        Serial.println("FAILED: no time from bridge (is the ESP32 online?)");
-        digitalWrite(yellow, 0);
-        blinkPin(red, 3);
-        attesting = false;
-        return; /* buffers kept - retry is possible */
-    }
+    isoTimestamp(timestamp, sizeof(timestamp));
 
     /* 3. Build the canonical signing payload and sign it. */
     kw_v1_fields_t fields = {
@@ -315,20 +273,24 @@ void attest()
         return;
     }
 
-    /* 5. Ship it via the bridge; type the proof URL when it comes back. */
-    char url[400];
-    if (!bridgePostAttestation(blockB64, url, sizeof(url))) {
-        Serial.println("FAILED: upload failed (buffers kept, press again to retry)");
-        digitalWrite(yellow, 0);
-        blinkPin(red, 3);
-        attesting = false;
-        return;
-    }
+    /* 5. No WiFi yet: type out a curl command that POSTs this attestation
+     *    and prints the resulting proof URL. Focus a terminal first, then
+     *    press Enter to run it. (Temporary until the WiFi board arrives.)
+     *
+     *    The PEM block's newlines are emitted as literal "\n" inside a
+     *    single-quoted JSON string, so nothing executes until you hit Enter,
+     *    and the server's JSON parser sees proper \n escapes.
+     *    URL extraction uses sed (always present) — no jq/python needed. */
+    Serial.println("Typing curl command (focus a terminal, then press Enter)");
 
-    Serial.print("Proof URL: ");
-    Serial.println(url);
-
-    Keyboard.print(url);
+    Keyboard.print(
+        "curl -s -X POST https://www.keywitness.io/api/attestations "
+        "-H 'Content-Type: application/json' "
+        "-d '{\"attestation\":\"-----BEGIN KEYWITNESS ATTESTATION-----\\n");
+    Keyboard.print(blockB64);
+    Keyboard.print(
+        "\\n-----END KEYWITNESS ATTESTATION-----\"}' "
+        "| sed -n 's/.*\"url\":\"\\([^\"]*\\)\".*/\\1/p'");
 
     clearBuffers();
     digitalWrite(yellow, 0);
@@ -419,7 +381,6 @@ void OnPress(int key)
 void setup()
 {
     Serial.begin(115200);
-    BRIDGE_SERIAL.begin(115200);
 
     pinMode(blue, OUTPUT);
     pinMode(red, OUTPUT);
