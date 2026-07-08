@@ -38,9 +38,12 @@
 #include <Crypto.h>
 #include <Ed25519.h>
 #include <SHA256.h>
+#include <AES.h>
+#include <GCM.h>
 #include <time.h>
 
 #include "attestation_v1.h"
+#include "signing_key.h"  /* gitignored: #define KW_SIGNING_SEED { ...32 bytes... } */
 
 /* --------------------------------------------------------------------- */
 /* Pins (Justin's wiring)                                                 */
@@ -82,21 +85,21 @@ static size_t recordLen = 0;
 static char jsonScratch[KW_JSON_SCRATCH];
 static char blockB64[KW_B64_MAX];
 
+/* v2 encryption scratch: IV(12) || ciphertext || tag(16). */
+static uint8_t encBlob[12 + KW_CLEARTEXT_MAX + 16];
+
 static bool recording = false;
 static bool attesting = false;
 static unsigned long idle = 0;
 
-/* Ed25519 key material */
-static uint8_t privKey[32];
+/* Ed25519 key material — hardcoded seed from signing_key.h (gitignored). */
+static const uint8_t privKey[32] = KW_SIGNING_SEED;
 static uint8_t pubKey[32];
 static char deviceId[32];
 
-/* EEPROM key store */
-struct KeyStore {
-    uint32_t magic;
-    uint8_t seed[32];
-};
-const uint32_t KW_EEPROM_MAGIC = 0x4B573101; /* "KW1" + version 1 */
+/* EEPROM: a monotonic attest counter, used to guarantee unique v2 AES keys
+ * across reboots (see deriveMessageKey). Stored away from anything else. */
+#define KW_COUNTER_EEPROM_ADDR 64
 
 /* --------------------------------------------------------------------- */
 /* LEDs                                                                   */
@@ -137,22 +140,7 @@ void blinkPin(int pin, int times)
 
 void loadOrGenerateKeys()
 {
-    KeyStore store;
-    EEPROM.get(0, store);
-
-    if (store.magic != KW_EEPROM_MAGIC) {
-        Serial.println("No key found - generating Ed25519 keypair...");
-        Entropy.Initialize();
-        for (int i = 0; i < 8; i++) {
-            uint32_t r = Entropy.random();
-            memcpy(&store.seed[i * 4], &r, 4);
-        }
-        store.magic = KW_EEPROM_MAGIC;
-        EEPROM.put(0, store);
-    }
-
-    memcpy(privKey, store.seed, 32);
-    Ed25519::derivePublicKey(pubKey, privKey);
+    Ed25519::derivePublicKey(pubKey, (uint8_t *)privKey);
 
     /* deviceId from the chip's unique ID.
      * Teensy 3.5/3.6 (Kinetis K64/K66): SIM_UIDMH/SIM_UIDML/SIM_UIDL.
@@ -197,7 +185,72 @@ static void isoTimestamp(char *out, size_t n)
 }
 
 /* --------------------------------------------------------------------- */
-/* Attestation                                                            */
+/* v2 encryption                                                          */
+/* --------------------------------------------------------------------- */
+
+/** Lowercase-hex encode into out (needs 2*len+1 bytes). */
+static void toHex(const uint8_t *in, size_t len, char *out)
+{
+    static const char hexLc[] = "0123456789abcdef";
+    for (size_t i = 0; i < len; i++) {
+        out[i * 2]     = hexLc[in[i] >> 4];
+        out[i * 2 + 1] = hexLc[in[i] & 0x0F];
+    }
+    out[len * 2] = '\0';
+}
+
+/**
+ * Derive a unique 32-byte AES key for this attestation.
+ *
+ * key = SHA-256( privKey || "kw-v2-enc" || counter || Entropy || micros )
+ *
+ * The EEPROM counter guarantees the key never repeats across attestations or
+ * reboots, which lets us use a fixed all-zero IV safely (AES-GCM only breaks
+ * if a key+IV pair is reused — here the key itself is always fresh). The key
+ * is published in the URL fragment, so its only requirement is uniqueness plus
+ * being unguessable to someone holding the ciphertext but not the URL; the
+ * secret privKey input provides that without needing a runtime CSPRNG.
+ */
+static void deriveMessageKey(uint8_t key[32])
+{
+    uint32_t counter = 0;
+    EEPROM.get(KW_COUNTER_EEPROM_ADDR, counter);
+    counter++;
+    EEPROM.put(KW_COUNTER_EEPROM_ADDR, counter);
+
+    uint32_t ent = Entropy.random();
+    uint32_t us  = micros();
+
+    SHA256 sha;
+    sha.update(privKey, 32);
+    sha.update((const uint8_t *)"kw-v2-enc", 9);
+    sha.update((const uint8_t *)&counter, sizeof(counter));
+    sha.update((const uint8_t *)&ent, sizeof(ent));
+    sha.update((const uint8_t *)&us, sizeof(us));
+    sha.finalize(key, 32);
+}
+
+/**
+ * AES-256-GCM encrypt `cleartext` into encBlob as IV(12) || ciphertext || tag(16).
+ * Returns total blob length. IV is all-zero (safe: key is unique per message).
+ */
+static size_t encryptCleartext(const uint8_t key[32], size_t textLen)
+{
+    static const uint8_t iv[12] = {0};
+
+    memcpy(encBlob, iv, 12);
+
+    GCM<AES256> gcm;
+    gcm.setKey(key, 32);
+    gcm.setIV(iv, 12);
+    gcm.encrypt(encBlob + 12, (const uint8_t *)cleartext, textLen);
+    gcm.computeTag(encBlob + 12 + textLen, 16);
+
+    return 12 + textLen + 16;
+}
+
+/* --------------------------------------------------------------------- */
+/* Attestation (v2: encrypted cleartext)                                  */
 /* --------------------------------------------------------------------- */
 
 void clearBuffers()
@@ -207,6 +260,16 @@ void clearBuffers()
     recordLen = 0;
     record[0] = '\0';
     idle = 0;
+}
+
+/* Small helper for the repeated failure exit. */
+static void attestFail(const char *msg)
+{
+    Serial.print("FAILED: ");
+    Serial.println(msg);
+    digitalWrite(yellow, 0);
+    blinkPin(red, 3);
+    attesting = false;
 }
 
 void attest()
@@ -219,68 +282,78 @@ void attest()
 
     attesting = true;
     digitalWrite(yellow, 1);
-    Serial.println("=== ATTESTING ===");
+    Serial.println("=== ATTESTING (v2) ===");
 
-    /* 1. Hash the keystroke timing record (hex SHA-256, matching
-     *    shared/attestation.ts hashKeystrokeBiometrics). */
+    /* 1. keystrokeBiometricsHash: hex SHA-256 of the timing record. */
     uint8_t digest[32];
-    SHA256 sha;
-    sha.update((const uint8_t *)record, recordLen);
-    sha.finalize(digest, sizeof(digest));
-
-    char bioHash[65];
-    static const char hexLc[] = "0123456789abcdef";
-    for (int i = 0; i < 32; i++) {
-        bioHash[i * 2] = hexLc[digest[i] >> 4];
-        bioHash[i * 2 + 1] = hexLc[digest[i] & 0x0F];
+    {
+        SHA256 sha;
+        sha.update((const uint8_t *)record, recordLen);
+        sha.finalize(digest, sizeof(digest));
     }
-    bioHash[64] = '\0';
+    char bioHash[65];
+    toHex(digest, 32, bioHash);
 
-    /* 2. Timestamp from the on-chip RTC. */
+    /* 2. cleartextHash: base64url SHA-256 of the cleartext. */
+    uint8_t ctDigest[32];
+    {
+        SHA256 sha;
+        sha.update((const uint8_t *)cleartext, cleartextLen);
+        sha.finalize(ctDigest, sizeof(ctDigest));
+    }
+    char cleartextHash[48];
+    kw_base64url_encode(ctDigest, 32, cleartextHash, sizeof(cleartextHash));
+
+    /* 3. Encrypt the cleartext (AES-256-GCM). The key goes in the URL
+     *    fragment; only ciphertext + hash are uploaded. */
+    uint8_t aesKey[32];
+    deriveMessageKey(aesKey);
+    size_t blobLen = encryptCleartext(aesKey, cleartextLen);
+
+    /* base64url the ciphertext blob and the key (key -> #fragment). */
+    static char encB64[((sizeof(encBlob) + 2) / 3) * 4 + 1];
+    kw_base64url_encode(encBlob, blobLen, encB64, sizeof(encB64));
+    char keyB64[48];
+    kw_base64url_encode(aesKey, 32, keyB64, sizeof(keyB64));
+
+    /* 4. Timestamp from the on-chip RTC. */
     char timestamp[40];
     isoTimestamp(timestamp, sizeof(timestamp));
 
-    /* 3. Build the canonical signing payload and sign it. */
-    kw_v1_fields_t fields = {
-        .cleartext = cleartext,
+    /* 5. Build the v2 canonical signing payload and sign it. */
+    kw_v2_fields_t fields = {
+        .cleartext_hash = cleartextHash,
+        .encrypted_cleartext = encB64,
         .device_id = deviceId,
         .timestamp = timestamp,
         .keystroke_biometrics_hash = bioHash,
+        .face_id_verified = false,
     };
 
-    size_t payloadLen = kw_build_signing_payload(&fields, jsonScratch,
-                                                 sizeof(jsonScratch));
-    if (payloadLen == 0) {
-        Serial.println("FAILED: payload too large");
-        digitalWrite(yellow, 0);
-        blinkPin(red, 3);
-        attesting = false;
-        return;
-    }
+    size_t payloadLen = kw_build_signing_payload_v2(&fields, jsonScratch,
+                                                    sizeof(jsonScratch));
+    if (payloadLen == 0) { attestFail("payload too large"); return; }
 
     uint8_t signature[64];
-    Ed25519::sign(signature, privKey, pubKey,
+    Ed25519::sign(signature, (uint8_t *)privKey, pubKey,
                   (const uint8_t *)jsonScratch, payloadLen);
 
-    /* 4. Full attestation block (base64url of the signed JSON). */
-    if (kw_build_attestation_block_b64(&fields, signature, pubKey,
-                                       jsonScratch, sizeof(jsonScratch),
-                                       blockB64, sizeof(blockB64)) == 0) {
-        Serial.println("FAILED: attestation too large");
-        digitalWrite(yellow, 0);
-        blinkPin(red, 3);
-        attesting = false;
+    /* 6. Full attestation block (base64url of the signed JSON). */
+    if (kw_build_attestation_block_b64_v2(&fields, signature, pubKey,
+                                          jsonScratch, sizeof(jsonScratch),
+                                          blockB64, sizeof(blockB64)) == 0) {
+        attestFail("attestation too large");
         return;
     }
 
-    /* 5. No WiFi yet: type out a curl command that POSTs this attestation
-     *    and prints the resulting proof URL. Focus a terminal first, then
-     *    press Enter to run it. (Temporary until the WiFi board arrives.)
+    /* 7. No WiFi yet: type a curl command that POSTs this attestation and
+     *    prints the proof URL WITH the decryption key appended as the #fragment
+     *    (the server never sees the key; the verify page reads it from the URL).
+     *    Focus a terminal, then press Enter to run it.
      *
-     *    The PEM block's newlines are emitted as literal "\n" inside a
-     *    single-quoted JSON string, so nothing executes until you hit Enter,
-     *    and the server's JSON parser sees proper \n escapes.
-     *    URL extraction uses sed (always present) — no jq/python needed. */
+     *    PEM newlines are emitted as literal "\n" inside a single-quoted JSON
+     *    string, so nothing runs until Enter and the server sees proper escapes.
+     *    A trailing `sed` appends "#<key>" to the returned URL. */
     Serial.println("Typing curl command (focus a terminal, then press Enter)");
 
     Keyboard.print(
@@ -290,7 +363,10 @@ void attest()
     Keyboard.print(blockB64);
     Keyboard.print(
         "\\n-----END KEYWITNESS ATTESTATION-----\"}' "
-        "| sed -n 's/.*\"url\":\"\\([^\"]*\\)\".*/\\1/p'");
+        "| sed -n 's/.*\"url\":\"\\([^\"]*\\)\".*/\\1/p' "
+        "| sed 's|$|#");
+    Keyboard.print(keyB64);
+    Keyboard.print("|'");
 
     clearBuffers();
     digitalWrite(yellow, 0);

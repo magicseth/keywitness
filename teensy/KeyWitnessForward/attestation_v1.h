@@ -22,6 +22,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -36,6 +37,17 @@ typedef struct {
     const char *timestamp;                 /* ISO 8601, e.g. 2026-07-07T20:00:00.000Z */
     const char *keystroke_biometrics_hash; /* hex SHA-256 of the timing record */
 } kw_v1_fields_t;
+
+/* v2: cleartext is AES-GCM encrypted; only a hash + ciphertext are uploaded.
+ * The decryption key travels in the URL fragment, not in the payload. */
+typedef struct {
+    const char *cleartext_hash;            /* base64url SHA-256 of the cleartext */
+    const char *encrypted_cleartext;       /* base64url of IV(12) || ciphertext || tag(16) */
+    const char *device_id;
+    const char *timestamp;                 /* ISO 8601 */
+    const char *keystroke_biometrics_hash; /* hex SHA-256 of the timing record */
+    bool face_id_verified;                 /* hardware has no Face ID: false */
+} kw_v2_fields_t;
 
 /**
  * All builders return the number of bytes written (excluding the NUL
@@ -70,6 +82,24 @@ size_t kw_build_attestation_block_b64(const kw_v1_fields_t *f,
                                       const uint8_t pub[KW_PUBKEY_LEN],
                                       char *scratch, size_t scratch_size,
                                       char *out, size_t out_size);
+
+/* ---- v2 (encrypted) equivalents ------------------------------------------
+ * version string is "keywitness-v2"; the signed payload uses cleartextHash +
+ * encryptedCleartext + faceIdVerified instead of the plaintext. */
+
+size_t kw_build_signing_payload_v2(const kw_v2_fields_t *f,
+                                   char *out, size_t out_size);
+
+size_t kw_build_attestation_json_v2(const kw_v2_fields_t *f,
+                                    const uint8_t sig[KW_SIGNATURE_LEN],
+                                    const uint8_t pub[KW_PUBKEY_LEN],
+                                    char *out, size_t out_size);
+
+size_t kw_build_attestation_block_b64_v2(const kw_v2_fields_t *f,
+                                         const uint8_t sig[KW_SIGNATURE_LEN],
+                                         const uint8_t pub[KW_PUBKEY_LEN],
+                                         char *scratch, size_t scratch_size,
+                                         char *out, size_t out_size);
 
 #ifdef __cplusplus
 }

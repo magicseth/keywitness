@@ -56,7 +56,32 @@ int main(int argc, char **argv)
     static char scratch[OUT_MAX];
     size_t out_len = 0;
 
-    if (strcmp(mode, "b64") == 0) {
+    if (strcmp(mode, "payload_v2") == 0 || strcmp(mode, "block_v2") == 0) {
+        /* fields: cleartextHash, encryptedCleartext, deviceId, timestamp,
+         *         bioHash, faceIdVerified("0"/"1") [, sigHex, pubHex] */
+        if (nfields < 6) { fprintf(stderr, "v2 needs 6+ fields\n"); return 2; }
+        kw_v2_fields_t f = {
+            .cleartext_hash = fields[0],
+            .encrypted_cleartext = fields[1],
+            .device_id = fields[2],
+            .timestamp = fields[3],
+            .keystroke_biometrics_hash = fields[4],
+            .face_id_verified = (fields[5][0] == '1'),
+        };
+        if (strcmp(mode, "payload_v2") == 0) {
+            out_len = kw_build_signing_payload_v2(&f, out, sizeof(out));
+        } else {
+            if (nfields < 8) { fprintf(stderr, "block_v2 needs sigHex, pubHex\n"); return 2; }
+            uint8_t sig[KW_SIGNATURE_LEN], pub[KW_PUBKEY_LEN];
+            if (hex_decode(fields[6], sig, sizeof(sig)) != 0 ||
+                hex_decode(fields[7], pub, sizeof(pub)) != 0) {
+                fprintf(stderr, "bad sig/pub hex\n"); return 2;
+            }
+            out_len = kw_build_attestation_block_b64_v2(&f, sig, pub,
+                                                        scratch, sizeof(scratch),
+                                                        out, sizeof(out));
+        }
+    } else if (strcmp(mode, "b64") == 0) {
         if (nfields < 1) return 2;
         size_t byte_len = strlen(fields[0]) / 2;
         uint8_t *bytes = malloc(byte_len ? byte_len : 1);

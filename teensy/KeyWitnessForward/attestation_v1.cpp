@@ -97,6 +97,15 @@ static void w_string_field(kw_writer_t *w, const char *key, const char *value)
     w_byte(w, '"');
 }
 
+/** `"key":true` / `"key":false` (JCS boolean, no quotes) */
+static void w_bool_field(kw_writer_t *w, const char *key, int value)
+{
+    w_byte(w, '"');
+    w_lit(w, key);
+    w_lit(w, "\":");
+    w_lit(w, value ? "true" : "false");
+}
+
 size_t kw_json_escape(const char *in, char *out, size_t out_size)
 {
     kw_writer_t w;
@@ -213,6 +222,87 @@ size_t kw_build_attestation_block_b64(const kw_v1_fields_t *f,
                                       char *out, size_t out_size)
 {
     size_t json_len = kw_build_attestation_json(f, sig, pub, scratch, scratch_size);
+    if (json_len == 0) return 0;
+
+    return kw_base64url_encode((const uint8_t *)scratch, json_len, out, out_size);
+}
+
+/* ------------------------------------------------------------------------ */
+/* v2 (encrypted) builders                                                   */
+/*                                                                           */
+/* JCS-sorted keys for the signed payload:                                   */
+/*   cleartextHash < deviceId < encryptedCleartext < faceIdVerified          */
+/*   < keystrokeBiometricsHash < timestamp < version                         */
+/* Full attestation inserts publicKey and signature (p, s) before timestamp. */
+/* version value is the string "keywitness-v2".                              */
+/* ------------------------------------------------------------------------ */
+
+#define KW_V2_VERSION "keywitness-v2"
+
+static void w_payload_fields_v2(kw_writer_t *w, const kw_v2_fields_t *f)
+{
+    w_string_field(w, "cleartextHash", f->cleartext_hash);
+    w_byte(w, ',');
+    w_string_field(w, "deviceId", f->device_id);
+    w_byte(w, ',');
+    w_string_field(w, "encryptedCleartext", f->encrypted_cleartext);
+    w_byte(w, ',');
+    w_bool_field(w, "faceIdVerified", f->face_id_verified);
+    w_byte(w, ',');
+    w_string_field(w, "keystrokeBiometricsHash", f->keystroke_biometrics_hash);
+}
+
+size_t kw_build_signing_payload_v2(const kw_v2_fields_t *f,
+                                   char *out, size_t out_size)
+{
+    kw_writer_t w;
+    w_init(&w, out, out_size);
+
+    w_byte(&w, '{');
+    w_payload_fields_v2(&w, f);
+    w_byte(&w, ',');
+    w_string_field(&w, "timestamp", f->timestamp);
+    w_lit(&w, ",\"version\":\"" KW_V2_VERSION "\"}");
+
+    return w_finish(&w);
+}
+
+size_t kw_build_attestation_json_v2(const kw_v2_fields_t *f,
+                                    const uint8_t sig[KW_SIGNATURE_LEN],
+                                    const uint8_t pub[KW_PUBKEY_LEN],
+                                    char *out, size_t out_size)
+{
+    char sig_b64[((KW_SIGNATURE_LEN + 2) / 3) * 4 + 1];
+    char pub_b64[((KW_PUBKEY_LEN + 2) / 3) * 4 + 1];
+
+    if (kw_base64url_encode(sig, KW_SIGNATURE_LEN, sig_b64, sizeof(sig_b64)) == 0)
+        return 0;
+    if (kw_base64url_encode(pub, KW_PUBKEY_LEN, pub_b64, sizeof(pub_b64)) == 0)
+        return 0;
+
+    kw_writer_t w;
+    w_init(&w, out, out_size);
+
+    w_byte(&w, '{');
+    w_payload_fields_v2(&w, f);
+    w_byte(&w, ',');
+    w_string_field(&w, "publicKey", pub_b64);
+    w_byte(&w, ',');
+    w_string_field(&w, "signature", sig_b64);
+    w_byte(&w, ',');
+    w_string_field(&w, "timestamp", f->timestamp);
+    w_lit(&w, ",\"version\":\"" KW_V2_VERSION "\"}");
+
+    return w_finish(&w);
+}
+
+size_t kw_build_attestation_block_b64_v2(const kw_v2_fields_t *f,
+                                         const uint8_t sig[KW_SIGNATURE_LEN],
+                                         const uint8_t pub[KW_PUBKEY_LEN],
+                                         char *scratch, size_t scratch_size,
+                                         char *out, size_t out_size)
+{
+    size_t json_len = kw_build_attestation_json_v2(f, sig, pub, scratch, scratch_size);
     if (json_len == 0) return 0;
 
     return kw_base64url_encode((const uint8_t *)scratch, json_len, out, out_size);

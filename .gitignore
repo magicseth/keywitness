@@ -11,3 +11,6 @@ teensy/esp32_bridge/wifi_secrets.h
 
 # Downloaded library archives
 teensy/*.zip
+
+# Hardcoded device signing key
+teensy/KeyWitnessForward/signing_key.h

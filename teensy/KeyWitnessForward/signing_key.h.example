@@ -1,0 +1,15 @@
+/* Copy this file to signing_key.h and paste in your device's Ed25519 seed.
+ * signing_key.h is gitignored — never commit a real private key.
+ *
+ * Generate a keypair (real CSPRNG) with:
+ *   node -e 'const n=require("tweetnacl");const k=n.sign.keyPair();
+ *     console.log([...k.secretKey.slice(0,32)].map(b=>"0x"+b.toString(16).padStart(2,"0")).join(", "));
+ *     console.log(Buffer.from(k.publicKey).toString("base64url"));'
+ *
+ * Paste the 32 bytes below, and register the printed public key /
+ * claim a username at keywitness.io. */
+#define KW_SIGNING_SEED { \
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, \
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, \
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, \
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }

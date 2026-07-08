@@ -5,7 +5,7 @@
   "description": "Host-side verification that the Teensy attestation builder is byte-compatible with the KeyWitness server",
   "type": "module",
   "scripts": {
-    "test": "tsx run_tests.mjs"
+    "test": "tsx run_tests.mjs && tsx run_tests_v2.mjs"
   },
   "dependencies": {
     "canonicalize": "^2.1.0",
