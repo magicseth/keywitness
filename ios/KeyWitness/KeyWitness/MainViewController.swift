@@ -934,7 +934,7 @@ class MainViewController: UIViewController {
 
         let items: [(String, String, UIColor)] = [
             ("keyboard.fill", "Type — keystrokes are witnessed", accentColor),
-            ("lock.fill", "Seal — signed in the Secure Enclave", accentColor),
+            ("lock.fill", "Seal — signed with a hardware-protected device key", accentColor),
             ("checkmark.shield.fill", "Apple verifies the device is real", greenGlow),
             ("faceid", "Face ID confirms it's you", greenGlow),
             ("link", "Anyone can verify — no trust needed", dimText),

@@ -89,7 +89,7 @@ class LearnMoreViewController: UIViewController {
                 "Type on the KeyWitness keyboard in any app",
                 "Every keystroke is witnessed: timing, position, pressure, radius",
                 "Tap Seal to build a cryptographic proof",
-                "A W3C Verifiable Credential is signed in the Secure Enclave",
+                "A W3C Verifiable Credential is signed with a device key held in the hardware-encrypted Keychain",
                 "Your text is encrypted — the server can't read it",
                 "Share the link. Anyone verifies in their browser.",
             ])
@@ -135,7 +135,7 @@ class LearnMoreViewController: UIViewController {
         addSectionHeader("The Trust Chain")
 
         addChainCard(items: [
-            ("cpu", "Secure Enclave", "Ed25519 key generated in hardware. Private key never leaves the chip.", accentColor),
+            ("cpu", "Hardware-protected key", "Ed25519 signing key generated on-device and stored in the hardware-encrypted Keychain (this device only).", accentColor),
             ("keyboard.fill", "Keystroke Biometrics", "Timing, position, pressure hashed into the credential. Unique to the typist and the moment.", accentColor),
             ("checkmark.shield.fill", "Apple App Attest", "Apple certifies: real device, real app, not jailbroken, not a simulator.", greenGlow),
             ("faceid", "Face ID", "The phone's owner saw this exact message and approved it.", greenGlow),
