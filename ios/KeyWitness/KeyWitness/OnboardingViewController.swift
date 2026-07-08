@@ -390,7 +390,7 @@ class OnboardingViewController: UIViewController {
 
         let items: [(String, String)] = [
             ("keyboard.fill", "Keystroke biometrics captured"),
-            ("cpu", "Signed in Secure Enclave"),
+            ("cpu", "Signed with a hardware-protected key"),
             ("checkmark.shield.fill", "Device verified by Apple"),
             ("faceid", "Owner confirmed with Face ID"),
         ]

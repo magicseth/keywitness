@@ -1,4 +1,4 @@
-import { mutation, internalMutation, internalQuery, query } from "./_generated/server";
+import { mutation, internalMutation, internalQuery } from "./_generated/server";
 import { v } from "convex/values";
 import * as cborg from "cborg";
 import nacl from "tweetnacl";
@@ -302,9 +302,11 @@ function coseKeyToRawP256(coseBytes: Uint8Array): Uint8Array {
   return raw;
 }
 
-// ── Debug: list credentials ──────────────────────────────────────────────────
+// ── Debug: list credentials (internal only) ──────────────────────────────────
+// Was a public query that dumped every keyId ↔ Ed25519 key ↔ counter, exposing
+// the device-to-signing-key graph. Now internal-only.
 
-export const listCredentials = query({
+export const listCredentials = internalQuery({
   args: {},
   handler: async (ctx) => {
     const creds = await ctx.db.query("appAttestCredentials").collect();

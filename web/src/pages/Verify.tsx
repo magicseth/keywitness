@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { verifyAttestation, VerificationResult, KeystrokeTiming, ProofVerificationResult, TrustStatus } from "../lib/verify";
@@ -220,7 +220,6 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
   const [, setKnownKeyVersion] = useState(0);
   const [trustStatus, setTrustStatus] = useState<TrustStatus | null>(null);
   const [resolvedShortId, setResolvedShortId] = useState<string | undefined>(undefined);
-  const [serverDeviceVerified, setServerDeviceVerified] = useState<boolean | undefined>(undefined);
   const [madePublic, setMadePublic] = useState<boolean | null>(null);
   const [makingPublic, setMakingPublic] = useState(false);
 
@@ -278,7 +277,6 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
       if (!text.trim()) return;
       setVerifying(true);
       setTrustStatus(null);
-      setServerDeviceVerified(undefined);
       try {
         const res = await verifyAttestation(text, encryptionKey, manualText);
         setResult(res);
@@ -302,22 +300,12 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
             // Trust check is best-effort; don't block verification
           }
         }
-        // Upload to server for device verification (App Attest requires server-side P-256)
-        if (res.valid) {
-          try {
-            const resp = await fetch("/api/attestations", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ attestation: text }),
-            });
-            if (resp.ok) {
-              const serverData = await resp.json();
-              setServerDeviceVerified(serverData.deviceVerified ?? false);
-            }
-          } catch {
-            // Server verification is best-effort
-          }
-        }
+        // PRIVACY: do NOT auto-upload the pasted attestation here. It previously
+        // POSTed the full block (including encryptedCleartext) to the server on
+        // every valid verify, silently persisting a private sealed message you
+        // were merely checking. Legitimately-created attestations are already
+        // uploaded at creation time, so `attestationDoc.deviceVerified` supplies
+        // the server-verified signal for anything the server actually knows about.
       } finally {
         setVerifying(false);
       }
@@ -358,15 +346,44 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
     : null;
 
   const writerName = keyRecord ? keyRecord.name : knownKeyName;
-  // Use DB-verified status when available, fall back to VC claims for pasted attestations
-  const hasDeviceVerification = !!attestationDoc?.deviceVerified || !!serverDeviceVerified || !!result?.appAttestPresent;
-  const hasFaceId = !!attestationDoc?.biometricSignature || !!result?.faceIdVerified;
+  // SECURITY: gate the strong trust badges on SERVER-verified signals only.
+  // `result.appAttestPresent` and `result.faceIdVerified` come straight from the
+  // pasted VC and are self-assertable / replayable — a self-signed forgery sets
+  // them freely. Device-verified must come from the server's App Attest check
+  // (attestationDoc.deviceVerified); Face ID must come from the server-stored,
+  // signer-bound biometric signature.
+  const serverDeviceVerified = !!attestationDoc?.deviceVerified;
+  const hasDeviceVerification = serverDeviceVerified;
+  const hasFaceId = !!attestationDoc?.biometricSignature;
   const hasKeystrokeData = !!(result?.keystrokeTimings && result.keystrokeTimings.length > 0);
   // Even without decrypted timings, keystroke proof is present if the VC has keystroke data
   const hasKeystrokeProof = hasKeystrokeData
     || !!(result?.proofs?.some((p) => p.proofType === "keystrokeAttestation" && p.valid));
   const isVoice = result?.attestationType === "spoken";
   const isPhoto = result?.attestationType === "photo";
+
+  // Decode the attested photo into an object URL once (was done inline in render
+  // on every re-render, leaking a blob URL and re-decoding each time). Revoke on
+  // change/unmount.
+  const photoUrl = useMemo(() => {
+    if (!isPhoto || !result?.cleartext || !result?.encrypted) return null;
+    try {
+      const inner = JSON.parse(atob(result.cleartext.replace(/-/g, "+").replace(/_/g, "/")));
+      if (!inner.imageBase64) return null;
+      const imgBytes = atob(inner.imageBase64.replace(/-/g, "+").replace(/_/g, "/"));
+      const arr = new Uint8Array(imgBytes.length);
+      for (let i = 0; i < imgBytes.length; i++) arr[i] = imgBytes.charCodeAt(i);
+      return URL.createObjectURL(new Blob([arr], { type: "image/jpeg" }));
+    } catch {
+      return null;
+    }
+  }, [isPhoto, result?.cleartext, result?.encrypted]);
+
+  useEffect(() => {
+    return () => {
+      if (photoUrl) URL.revokeObjectURL(photoUrl);
+    };
+  }, [photoUrl]);
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-gray-100">
@@ -384,7 +401,10 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
                 Paste a KeyWitness attestation below to find out.
               </p>
             </div>
+            <label htmlFor="attestation-input" className="sr-only">Attestation to verify</label>
             <textarea
+              id="attestation-input"
+              aria-label="Attestation to verify"
               className="w-full h-32 bg-[#111] border border-gray-800 rounded-xl p-4 font-mono text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-gray-600 focus:ring-1 focus:ring-gray-600 resize-y mb-3"
               placeholder="-----BEGIN KEYWITNESS ATTESTATION-----&#10;...&#10;-----END KEYWITNESS ATTESTATION-----"
               value={input}
@@ -410,14 +430,26 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
 
         {/* ── Loading state ── */}
         {verifying && !result && (
-          <div className="text-center py-20">
+          <div className="text-center py-20" role="status" aria-live="polite">
             <div className="text-gray-400 text-lg">Checking...</div>
           </div>
         )}
 
         {/* ── Results ── */}
         {result && (
-          <div className="mb-12">
+          <div className="mb-12" role="status" aria-live="polite">
+
+            {/* ── Decryption failed (valid signature, wrong/missing key) ── */}
+            {result.decryptionFailed && (
+              <div className="rounded-2xl p-6 mb-6 bg-amber-950/20 border border-amber-900/30">
+                <div className="text-amber-300 font-medium">Signature valid, but the message couldn’t be decrypted</div>
+                <p className="text-amber-200/70 text-sm mt-1">
+                  This attestation’s signature checks out, but the decryption key in the link is missing or wrong,
+                  so the sealed text can’t be shown. Make sure you opened the full URL including the part after
+                  <span className="font-mono"> # </span>.
+                </p>
+              </div>
+            )}
 
             {/* ── Error / Invalid state ── */}
             {(isError || status === "invalid") && (
@@ -451,22 +483,8 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
                   <div className="px-8 pt-8 pb-6 sm:px-10 sm:pt-10 sm:pb-8">
                     {isPhoto ? (
                       <div>
-                        {result.cleartext && result.encrypted ? (
-                          (() => {
-                            // Decrypt and display photo from encrypted payload
-                            try {
-                              const inner = JSON.parse(atob(result.cleartext.replace(/-/g, "+").replace(/_/g, "/")));
-                              if (inner.imageBase64) {
-                                const imgBytes = atob(inner.imageBase64.replace(/-/g, "+").replace(/_/g, "/"));
-                                const arr = new Uint8Array(imgBytes.length);
-                                for (let i = 0; i < imgBytes.length; i++) arr[i] = imgBytes.charCodeAt(i);
-                                const blob = new Blob([arr], { type: "image/jpeg" });
-                                const url = URL.createObjectURL(blob);
-                                return <img src={url} alt="Attested photo" className="w-full rounded-lg" />;
-                              }
-                            } catch { /* fall through */ }
-                            return null;
-                          })()
+                        {photoUrl ? (
+                          <img src={photoUrl} alt="Attested photo" className="w-full rounded-lg" />
                         ) : null}
                         <div className="mt-4 text-center">
                           <div className="text-green-400 text-sm font-medium mb-1">Unfiltered Photograph</div>
