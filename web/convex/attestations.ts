@@ -1,7 +1,7 @@
 import { mutation, internalMutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import { internal } from "./_generated/api";
 import nacl from "tweetnacl";
+import { extractSignerPublicKey } from "./lib/verify";
 
 /** Generate a cryptographically random short ID. */
 function generateShortId(length = 10): string {
@@ -80,16 +80,11 @@ export const upload = mutation({
       shortId = generateShortId();
     }
 
-    // Try to allocate a status index for BitstringStatusList revocation
+    // Allocate a single status index for BitstringStatusList revocation.
+    // (Previously this ALSO fired internal.trust.allocateStatusIndex via the
+    // scheduler, which advanced nextIndex a second time — wasting/gapping half
+    // the list capacity. The inline allocation below is the only one needed.)
     let statusIndex: number | undefined;
-    try {
-      const result = await ctx.scheduler.runAfter(0, internal.trust.allocateStatusIndex, { listId: "1" });
-      void result; // fire and forget — we'll set it in a follow-up
-    } catch {
-      // Status list not initialized yet — skip. Attestation still works.
-    }
-
-    // Attempt synchronous status index allocation
     const list = await ctx.db
       .query("statusLists")
       .withIndex("by_listId", (q) => q.eq("listId", "1"))
@@ -164,6 +159,14 @@ export const makePublic = mutation({
       .first();
     if (!doc) throw new Error("Attestation not found");
     if (doc.publicEncryptionKey) return { success: true, alreadyPublic: true };
+    if (!doc.attestation) throw new Error("Cannot make a stored attestation public");
+
+    // SECURITY: only accept a key that actually decrypts this attestation.
+    // makePublic was first-write-wins with no validation, so an attacker could
+    // front-run and pin a WRONG key, permanently breaking decryption. Verify
+    // the key round-trips against the signed cleartextHash before pinning it.
+    const ok = await encryptionKeyMatches(doc.attestation, args.encryptionKey);
+    if (!ok) throw new Error("Encryption key does not decrypt this attestation");
 
     await ctx.db.patch(doc._id, { publicEncryptionKey: args.encryptionKey });
     return { success: true, alreadyPublic: false };
@@ -186,6 +189,22 @@ export const addBiometricVerification = mutation({
 
     const age = Date.now() - doc.createdAt;
     if (age > 60_000) throw new Error("Biometric verification window expired (60s)");
+
+    // SECURITY: bind the biometric confirmation to the ORIGINAL signer of the
+    // attestation. Without this, the challenge (keywitness:biometric:{shortId})
+    // is fully public, so any keypair could stamp a "Face ID verified" badge
+    // onto someone else's attestation. Fail closed if we can't identify the
+    // signer (e.g. stored/large attestations we don't hold inline).
+    if (!doc.attestation) {
+      throw new Error("Cannot verify biometric for a stored attestation");
+    }
+    const attestationSigner = extractSignerPublicKey(doc.attestation);
+    if (!attestationSigner) {
+      throw new Error("Could not determine the attestation signer");
+    }
+    if (attestationSigner !== args.publicKey) {
+      throw new Error("Biometric key does not match the attestation signer");
+    }
 
     // Verify the Ed25519 signature over "keywitness:biometric:{shortId}"
     const challenge = `keywitness:biometric:${args.shortId}`;
@@ -257,4 +276,56 @@ function base64urlDecodeAttest(input: string): Uint8Array {
     bytes[i] = binaryString.charCodeAt(i);
   }
   return bytes;
+}
+
+function base64urlEncodeAttest(bytes: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/**
+ * Does `encryptionKey` (base64url AES-256-GCM key) actually decrypt this
+ * attestation to content matching its signed `cleartextHash`? Used to reject a
+ * wrong/forged key in makePublic. Returns false on any parse/crypto failure.
+ */
+async function encryptionKeyMatches(
+  attestationBlock: string,
+  encryptionKey: string,
+): Promise<boolean> {
+  try {
+    const begin = "-----BEGIN KEYWITNESS ATTESTATION-----";
+    const end = "-----END KEYWITNESS ATTESTATION-----";
+    const b = attestationBlock.indexOf(begin);
+    const e = attestationBlock.indexOf(end);
+    if (b === -1 || e === -1) return false;
+    const body = attestationBlock.slice(b + begin.length, e).replace(/\s+/g, "");
+    const json = JSON.parse(new TextDecoder().decode(base64urlDecodeAttest(body)));
+
+    // v3 stores these under credentialSubject; v2 at the top level.
+    const subject = json.credentialSubject ?? json;
+    const encryptedCleartext: string | undefined = subject.encryptedCleartext;
+    const cleartextHash: string | undefined = subject.cleartextHash;
+    if (!encryptedCleartext || !cleartextHash) return false;
+
+    const toAB = (u: Uint8Array): ArrayBuffer =>
+      u.buffer.slice(u.byteOffset, u.byteOffset + u.byteLength) as ArrayBuffer;
+    const keyBytes = base64urlDecodeAttest(encryptionKey);
+    if (keyBytes.length !== 32) return false;
+    const blob = base64urlDecodeAttest(encryptedCleartext);
+    const iv = blob.slice(0, 12);
+    const ct = blob.slice(12);
+    const key = await crypto.subtle.importKey("raw", toAB(keyBytes), "AES-GCM", false, ["decrypt"]);
+    const plaintext = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: toAB(iv), tagLength: 128 },
+      key,
+      toAB(ct),
+    );
+    const inner = JSON.parse(new TextDecoder().decode(plaintext));
+    const cleartext: string = inner.cleartext;
+    const hashBuf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(cleartext));
+    return base64urlEncodeAttest(new Uint8Array(hashBuf)) === cleartextHash;
+  } catch {
+    return false;
+  }
 }

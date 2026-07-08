@@ -59,7 +59,7 @@ http.route({
       const usernameDoc = await ctx.runQuery(api.usernames.getByPublicKey, { publicKey: signerKey });
       if (usernameDoc) {
         username = usernameDoc.username;
-        const seqResult = await ctx.runMutation(api.usernames.allocateSeq, { username });
+        const seqResult = await ctx.runMutation(internal.usernames.allocateSeq, { username });
         if (seqResult) {
           usernameSeq = seqResult.seq;
         }
@@ -574,23 +574,6 @@ http.route({
   }),
 });
 
-// ── Debug: App Attest credentials ────────────────────────────────────────────
-
-http.route({
-  path: "/api/app-attest/debug",
-  method: "GET",
-  handler: httpAction(async (ctx) => {
-    const creds = await ctx.runQuery(api.appAttest.listCredentials, {});
-    return new Response(JSON.stringify({ credentials: creds }, null, 2), {
-      status: 200,
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-      },
-    });
-  }),
-});
-
 // ── JSON-LD Context (Phase 2.3) ──────────────────────────────────────────────
 
 // GET /ns/v1 - KeyWitness JSON-LD context document
@@ -699,10 +682,7 @@ http.route({
     }
 
     // Look up registered keys by name
-    const allKeys = await ctx.runQuery(api.keys.list, {});
-    const matchingKey = allKeys.find(
-      (k) => k.name.toLowerCase() === name.toLowerCase(),
-    );
+    const matchingKey = await ctx.runQuery(api.keys.getByName, { name });
 
     if (!matchingKey) {
       return new Response(JSON.stringify({ names: {}, keywitness: {} }), {

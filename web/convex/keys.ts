@@ -1,4 +1,4 @@
-import { mutation, query } from "./_generated/server";
+import { mutation, query, internalQuery } from "./_generated/server";
 import { v } from "convex/values";
 import nacl from "tweetnacl";
 
@@ -56,6 +56,16 @@ export const register = mutation({
       throw new Error("Signature verification failed — you must prove ownership of the private key to register");
     }
 
+    // SECURITY: enforce name uniqueness. NIP-05 resolution returned the first
+    // arbitrary match, so without this any key could squat any name and make
+    // discovery non-deterministic / attacker-controllable.
+    const nameLower = args.name.toLowerCase();
+    const allKeys = await ctx.db.query("keys").collect();
+    const nameOwner = allKeys.find((k) => k.name.toLowerCase() === nameLower);
+    if (nameOwner && nameOwner.publicKey !== args.publicKey) {
+      throw new Error("Name is already registered to a different key.");
+    }
+
     const existing = await ctx.db
       .query("keys")
       .withIndex("by_publicKey", (q) => q.eq("publicKey", args.publicKey))
@@ -88,7 +98,22 @@ export const getByPublicKey = query({
   },
 });
 
-export const list = query({
+/** Public NIP-05 resolution: deterministically resolve a name to one key
+ * (earliest registration wins if legacy duplicates exist). */
+export const getByName = query({
+  args: { name: v.string() },
+  handler: async (ctx, args) => {
+    const nameLower = args.name.toLowerCase();
+    const all = await ctx.db.query("keys").collect();
+    const matches = all
+      .filter((k) => k.name.toLowerCase() === nameLower)
+      .sort((a, b) => a.registeredAt - b.registeredAt);
+    return matches[0] ?? null;
+  },
+});
+
+// Internal-only: dumps the full NIP-05 key registry. Not for public exposure.
+export const list = internalQuery({
   args: {},
   handler: async (ctx) => {
     return await ctx.db.query("keys").collect();

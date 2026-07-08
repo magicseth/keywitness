@@ -26,6 +26,20 @@ function verifyProofOfPossession(publicKey: string, signature: string, message: 
   if (!valid) throw new Error("Proof-of-possession failed — cannot prove ownership of public key");
 }
 
+/** Cryptographically random 6-digit recovery code (000000–999999), unbiased. */
+function generateRecoveryCode(): string {
+  const buf = new Uint32Array(1);
+  // Reject the top of the uint32 range that doesn't divide evenly into 1e6,
+  // so every code is equally likely (no modulo bias).
+  const limit = Math.floor(0xffffffff / 1_000_000) * 1_000_000;
+  let n: number;
+  do {
+    crypto.getRandomValues(buf);
+    n = buf[0];
+  } while (n >= limit);
+  return String(n % 1_000_000).padStart(6, "0");
+}
+
 /** SHA-256 hash a string, return hex. */
 async function sha256Hex(input: string): Promise<string> {
   const data = new TextEncoder().encode(input);
@@ -257,8 +271,8 @@ export const createRecoveryRequest = internalMutation({
       throw new Error("This device is already authorized.");
     }
 
-    // Generate 6-digit code
-    const code = String(Math.floor(100000 + Math.random() * 900000));
+    // Generate 6-digit code with a CSPRNG (rejection-sampled to avoid modulo bias)
+    const code = generateRecoveryCode();
     const codeHash = await sha256Hex(code);
 
     // Delete any existing recovery requests for this username+key
@@ -347,8 +361,10 @@ export const confirmRecovery = mutation({
   },
 });
 
-/** Allocate the next sequence number for a username. */
-export const allocateSeq = mutation({
+/** Allocate the next sequence number for a username.
+ * Internal-only: called from the verified upload path (http.ts). Exposing this
+ * publicly let anyone bump a victim's typed.by/{user}/{n} sequence. */
+export const allocateSeq = internalMutation({
   args: { username: v.string() },
   handler: async (ctx, args) => {
     const username = args.username.toLowerCase();
