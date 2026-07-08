@@ -24,8 +24,7 @@
  * Arduino IDE setup:
  *   - Board: Teensy 3.6 or 4.x, USB Type: "Serial + Keyboard + Mouse + Joystick"
  *   - Libraries: USBHost_t36 (bundled with Teensyduino),
- *                Crypto by Rhys Weatherley (Ed25519, SHA256),
- *                Entropy (bundled with Teensyduino)
+ *                Crypto by Rhys Weatherley (Ed25519, SHA256, AES256, GCM)
  *
  * First boot generates an Ed25519 keypair (seed stored in EEPROM) and prints
  * the deviceId + public key on the USB serial monitor — register that key /
@@ -34,7 +33,6 @@
 
 #include "USBHost_t36.h"
 #include <EEPROM.h>
-#include <Entropy.h>
 #include <Crypto.h>
 #include <Ed25519.h>
 #include <SHA256.h>
@@ -202,7 +200,7 @@ static void toHex(const uint8_t *in, size_t len, char *out)
 /**
  * Derive a unique 32-byte AES key for this attestation.
  *
- * key = SHA-256( privKey || "kw-v2-enc" || counter || Entropy || micros )
+ * key = SHA-256( privKey || "kw-v2-enc" || counter || micros )
  *
  * The EEPROM counter guarantees the key never repeats across attestations or
  * reboots, which lets us use a fixed all-zero IV safely (AES-GCM only breaks
@@ -218,14 +216,12 @@ static void deriveMessageKey(uint8_t key[32])
     counter++;
     EEPROM.put(KW_COUNTER_EEPROM_ADDR, counter);
 
-    uint32_t ent = Entropy.random();
-    uint32_t us  = micros();
+    uint32_t us = micros();
 
     SHA256 sha;
     sha.update(privKey, 32);
     sha.update((const uint8_t *)"kw-v2-enc", 9);
     sha.update((const uint8_t *)&counter, sizeof(counter));
-    sha.update((const uint8_t *)&ent, sizeof(ent));
     sha.update((const uint8_t *)&us, sizeof(us));
     sha.finalize(key, 32);
 }
