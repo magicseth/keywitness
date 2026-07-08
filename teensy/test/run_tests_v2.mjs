@@ -64,16 +64,22 @@ const fail = (name, msg) => { failures++; console.error(`  FAIL [${name}] ${msg}
 console.log("v2 (encrypted) — payload match, server verify, decrypt round-trip:\n");
 
 for (const [name, cleartext] of CLEARTEXTS) {
-  const ctBytes = new TextEncoder().encode(cleartext);
-  const cleartextHash = b64url(await sha256(ctBytes));
+  // cleartextHash is over the RAW text (matches what the verify page recomputes
+  // from inner.cleartext), NOT over the JSON wrapper.
+  const cleartextHash = b64url(await sha256(new TextEncoder().encode(cleartext)));
 
-  // Encrypt exactly like the device: AES-256-GCM, 12-byte zero IV (unique key),
+  // The device encrypts a JSON object {"cleartext":...}, not the raw text —
+  // the verify page JSON.parses the plaintext and reads .cleartext.
+  const innerJSON = JSON.stringify({ cleartext, keystrokeTimings: [] });
+  const innerBytes = new TextEncoder().encode(innerJSON);
+
+  // Encrypt like the device: AES-256-GCM, 12-byte zero IV (unique key),
   // blob = IV || ciphertext || tag.
   const rawKey = Buffer.alloc(32);
   for (let i = 0; i < 32; i++) rawKey[i] = (i * 53 + name.length) & 0xff; // deterministic per-test key
   const iv = new Uint8Array(12); // device uses zero IV with a unique key
   const cryptoKey = await subtle.importKey("raw", rawKey, "AES-GCM", false, ["encrypt", "decrypt"]);
-  const ctTag = new Uint8Array(await subtle.encrypt({ name: "AES-GCM", iv, tagLength: 128 }, cryptoKey, ctBytes));
+  const ctTag = new Uint8Array(await subtle.encrypt({ name: "AES-GCM", iv, tagLength: 128 }, cryptoKey, innerBytes));
   const blob = new Uint8Array(12 + ctTag.length);
   blob.set(iv, 0);
   blob.set(ctTag, 12);
@@ -117,19 +123,24 @@ for (const [name, cleartext] of CLEARTEXTS) {
   const nonce = blob2.subarray(0, 12);
   const rest = blob2.subarray(12);
   const dkey = await subtle.importKey("raw", Buffer.from(keyB64, "base64url"), "AES-GCM", false, ["decrypt"]);
-  let decrypted;
+  let decryptedJSON;
   try {
-    decrypted = new TextDecoder().decode(await subtle.decrypt({ name: "AES-GCM", iv: nonce, tagLength: 128 }, dkey, rest));
+    decryptedJSON = new TextDecoder().decode(await subtle.decrypt({ name: "AES-GCM", iv: nonce, tagLength: 128 }, dkey, rest));
   } catch (e) {
     fail(name, `decrypt failed: ${e.message}`); continue;
   }
-  if (decrypted !== cleartext) { fail(name, `decrypt mismatch: ${JSON.stringify(decrypted)}`); continue; }
 
-  // 4. cleartextHash integrity.
-  const recomputed = b64url(await sha256(new TextEncoder().encode(decrypted)));
+  // Mirror the website exactly: JSON.parse the plaintext, read .cleartext.
+  let inner;
+  try { inner = JSON.parse(decryptedJSON); }
+  catch (e) { fail(name, `plaintext is not JSON (this was the bug): ${JSON.stringify(decryptedJSON)}`); continue; }
+  if (inner.cleartext !== cleartext) { fail(name, `inner.cleartext mismatch: ${JSON.stringify(inner.cleartext)}`); continue; }
+
+  // 4. cleartextHash integrity — hash of inner.cleartext must match the envelope.
+  const recomputed = b64url(await sha256(new TextEncoder().encode(inner.cleartext)));
   if (recomputed !== parsed.cleartextHash) { fail(name, "cleartextHash mismatch"); continue; }
 
-  console.log(`  ok  ${name} — server verified v2, ciphertext hidden, decrypts to original`);
+  console.log(`  ok  ${name} — server verified v2, {"cleartext":…} decrypts + hash matches`);
 }
 
 console.log(

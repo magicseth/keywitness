@@ -68,10 +68,20 @@ USBHIDParser hid1(myusb);
 /* State                                                                  */
 /* --------------------------------------------------------------------- */
 
-#define KW_CLEARTEXT_MAX   4096
-#define KW_RECORD_MAX      16384
-#define KW_JSON_SCRATCH    (KW_CLEARTEXT_MAX * 6 + 1024)
-#define KW_B64_MAX         ((KW_JSON_SCRATCH / 3 + 1) * 4 + 8)
+/* Sizes are chained so every downstream buffer holds the worst case.
+ * 1024 chars is plenty for a keyboard attestation and keeps RAM comfortable
+ * on the Teensy 3.6 (256 KB) alongside the USB host stack. */
+#define KW_CLEARTEXT_MAX   1024
+#define KW_RECORD_MAX      8192
+/* Inner plaintext that gets encrypted: {"cleartext":"<esc>","keystrokeTimings":[]}
+ * Worst-case JSON escaping is 6x (control chars -> \u00XX). */
+#define KW_INNER_MAX       (KW_CLEARTEXT_MAX * 6 + 64)
+/* Ciphertext blob = IV(12) || ciphertext || tag(16). */
+#define KW_ENCBLOB_MAX     (12 + KW_INNER_MAX + 16)
+#define KW_ENCB64_MAX      (((KW_ENCBLOB_MAX + 2) / 3) * 4 + 1)
+/* Outer attestation JSON holds encB64 + fixed fields (~1 KB slack). */
+#define KW_JSON_SCRATCH    (KW_ENCB64_MAX + 1024)
+#define KW_B64_MAX         (((KW_JSON_SCRATCH + 2) / 3) * 4 + 8)
 
 static char cleartext[KW_CLEARTEXT_MAX];
 static size_t cleartextLen = 0;
@@ -83,8 +93,10 @@ static size_t recordLen = 0;
 static char jsonScratch[KW_JSON_SCRATCH];
 static char blockB64[KW_B64_MAX];
 
-/* v2 encryption scratch: IV(12) || ciphertext || tag(16). */
-static uint8_t encBlob[12 + KW_CLEARTEXT_MAX + 16];
+/* v2 encryption scratch. */
+static char    innerJson[KW_INNER_MAX];        /* {"cleartext":...} before encryption */
+static uint8_t encBlob[KW_ENCBLOB_MAX];        /* IV || ciphertext || tag */
+static char    encB64[KW_ENCB64_MAX];          /* base64url of encBlob */
 
 static bool recording = false;
 static bool attesting = false;
@@ -227,22 +239,48 @@ static void deriveMessageKey(uint8_t key[32])
 }
 
 /**
- * AES-256-GCM encrypt `cleartext` into encBlob as IV(12) || ciphertext || tag(16).
- * Returns total blob length. IV is all-zero (safe: key is unique per message).
+ * Build the inner plaintext the website expects to find inside the ciphertext:
+ *   {"cleartext":"<json-escaped text>","keystrokeTimings":[]}
+ * The verify page JSON.parses this and reads .cleartext (see iOS
+ * EncryptedInnerPayload). Returns length, or 0 on overflow.
  */
-static size_t encryptCleartext(const uint8_t key[32], size_t textLen)
+static size_t buildInnerJson()
+{
+    static const char pre[]  = "{\"cleartext\":\"";
+    static const char post[] = "\",\"keystrokeTimings\":[]}";
+    const size_t preLen = sizeof(pre) - 1, postLen = sizeof(post) - 1;
+
+    if (preLen + postLen + 1 >= sizeof(innerJson)) return 0;
+    memcpy(innerJson, pre, preLen);
+
+    size_t esc = kw_json_escape(cleartext, innerJson + preLen,
+                                sizeof(innerJson) - preLen - postLen);
+    if (esc == 0) return 0; /* overflow (cleartext is non-empty here) */
+
+    memcpy(innerJson + preLen + esc, post, postLen);
+    innerJson[preLen + esc + postLen] = '\0';
+    return preLen + esc + postLen;
+}
+
+/**
+ * AES-256-GCM encrypt `plaintext` into encBlob as IV(12) || ciphertext || tag(16).
+ * Returns total blob length, or 0 if it wouldn't fit. IV is all-zero (safe:
+ * the key is unique per message).
+ */
+static size_t encryptBlob(const uint8_t key[32], const uint8_t *plaintext, size_t len)
 {
     static const uint8_t iv[12] = {0};
+    if (12 + len + 16 > sizeof(encBlob)) return 0;
 
     memcpy(encBlob, iv, 12);
 
     GCM<AES256> gcm;
     gcm.setKey(key, 32);
     gcm.setIV(iv, 12);
-    gcm.encrypt(encBlob + 12, (const uint8_t *)cleartext, textLen);
-    gcm.computeTag(encBlob + 12 + textLen, 16);
+    gcm.encrypt(encBlob + 12, plaintext, len);
+    gcm.computeTag(encBlob + 12 + len, 16);
 
-    return 12 + textLen + 16;
+    return 12 + len + 16;
 }
 
 /* --------------------------------------------------------------------- */
@@ -300,14 +338,18 @@ void attest()
     char cleartextHash[48];
     kw_base64url_encode(ctDigest, 32, cleartextHash, sizeof(cleartextHash));
 
-    /* 3. Encrypt the cleartext (AES-256-GCM). The key goes in the URL
-     *    fragment; only ciphertext + hash are uploaded. */
+    /* 3. Wrap the cleartext as {"cleartext":...} (what the verify page parses),
+     *    then AES-256-GCM encrypt it. The key goes in the URL fragment; only
+     *    ciphertext + hash are uploaded. */
+    size_t innerLen = buildInnerJson();
+    if (innerLen == 0) { attestFail("cleartext too large"); return; }
+
     uint8_t aesKey[32];
     deriveMessageKey(aesKey);
-    size_t blobLen = encryptCleartext(aesKey, cleartextLen);
+    size_t blobLen = encryptBlob(aesKey, (const uint8_t *)innerJson, innerLen);
+    if (blobLen == 0) { attestFail("ciphertext too large"); return; }
 
     /* base64url the ciphertext blob and the key (key -> #fragment). */
-    static char encB64[((sizeof(encBlob) + 2) / 3) * 4 + 1];
     kw_base64url_encode(encBlob, blobLen, encB64, sizeof(encB64));
     char keyB64[48];
     kw_base64url_encode(aesKey, 32, keyB64, sizeof(keyB64));
