@@ -5,3 +5,6 @@ data/
 *.xcuserstate
 DerivedData/
 build/
+
+# Wi-Fi credentials for hardware bridge
+teensy/esp32_bridge/wifi_secrets.h

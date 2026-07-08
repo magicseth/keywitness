@@ -1,0 +1,17 @@
+{
+  "name": "@keywitness/teensy-test",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Host-side verification that the Teensy attestation builder is byte-compatible with the KeyWitness server",
+  "type": "module",
+  "scripts": {
+    "test": "tsx run_tests.mjs"
+  },
+  "dependencies": {
+    "canonicalize": "^2.1.0",
+    "tweetnacl": "^1.0.3"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0"
+  }
+}
