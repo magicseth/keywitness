@@ -122,7 +122,7 @@ while True:
         if enabled and len(text) > 0:
             print('Record:', record)
             print()
-            print("===== BEGIN TEXT =====\n" + text + "\n====== END TEXT ======\n")
+            print('Text:\n\n' + text + '\n')
 
             # hash record
             sha = hashlib.new('sha256')
