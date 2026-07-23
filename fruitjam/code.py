@@ -178,24 +178,22 @@ def type_over_host(previous, message):
     if message:
         layout.write(message)
 
-def flash_sensor():
-    # each get_image lights the sensor LED (find mode), so a quick burst
-    # reads as a deliberate flash, distinct from the slower idle polling
-    for _ in range(3):
-        try:
-            finger.get_image()
-        except Exception:
-            pass
-        sleep(0.12)
-
 def start_recording():
     global enabled, record, text
     record = ''
     text = ''
     enabled = True
     led.value = True
-    if finger:
-        flash_sensor()  # LED flash is the "recording" cue
+    # recording cue: double green flash on the NeoPixels. (Deliberately NOT
+    # extra sensor commands — bursting get_image desyncs the sensor's UART
+    # protocol, after which every poll times out and starves passthrough.)
+    for _ in range(2):
+        pixels.fill((0, 60, 0))
+        pixels.show()
+        sleep(0.12)
+        pixels.fill((0, 0, 0))
+        pixels.show()
+        sleep(0.12)
 
 def fingerprint_slot():
     """The touch image is already captured; template it and search.
@@ -464,8 +462,16 @@ while True:
         last_fp_poll = now
         try:
             r = finger.get_image()
-        except Exception:
+        except Exception as e:
+            # a garbled exchange leaves stale bytes in the UART; flush them
+            # so the next poll starts on a clean packet boundary instead of
+            # timing out forever (which starves keyboard passthrough)
             r = None
+            print('Sensor poll error, resyncing:', e)
+            try:
+                fp_uart.reset_input_buffer()
+            except Exception:
+                pass
         if r == adafruit_fingerprint.OK:
             if fp_touch_ready:
                 fp_touch_ready = False
