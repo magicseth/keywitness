@@ -13,6 +13,10 @@ _IV = (
     0x510E527FADE682D1, 0x9B05688C2B3E6C1F, 0x1F83D9ABFB41BD6B, 0x5BE0CD19137E2179,
 )
 
+# Optional per-block callback (set from outside, e.g. to animate LEDs while
+# a long signing hash runs). Called once per 128-byte block.
+on_block = None
+
 _K = (
     0x428A2F98D728AE22, 0x7137449123EF65CD, 0xB5C0FBCFEC4D3B2F, 0xE9B5DBA58189DBBC,
     0x3956C25BF348B538, 0x59F111F1B605D019, 0x923F82A4AF194F9B, 0xAB1C5ED5DA6D8118,
@@ -44,7 +48,10 @@ def digest(msg):
     M = _M
     K = _K
     s0, s1, s2, s3, s4, s5, s6, s7 = _IV
+    cb = on_block
     for off in range(0, len(msg), 128):
+        if cb:
+            cb()
         W = [int.from_bytes(msg[off + j:off + j + 8], 'big') for j in range(0, 128, 8)]
         for i in range(16, 80):
             x = W[i - 15]

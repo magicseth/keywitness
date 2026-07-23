@@ -29,6 +29,7 @@ import adafruit_fingerprint
 import hashlib
 import ed25519
 import gcm
+import sha512
 import adafruit_ntp
 import json
 import binascii
@@ -151,6 +152,14 @@ def base64url(s):
     result = result.replace('+', '-').replace('/', '_').replace('=', '').replace('\n', '')
     return result
 
+# random pixel show while the long signing hashes run (called per block)
+sha512.on_block = flash_display
+
+def drain_keyboard():
+    """Discard buffered keystrokes — the keyboard is disabled while busy."""
+    while supervisor.runtime.serial_bytes_available:
+        sys.stdin.read(supervisor.runtime.serial_bytes_available)
+
 def type_over_host(previous, message):
     """Backspace `previous` out of the host's text field, then type `message`."""
     for _ in range(len(previous)):
@@ -191,7 +200,7 @@ def fingerprint_slot():
         return None
 
 def attest_and_send(end_slot):
-    global enabled, record, text, fp_start_slot, fp_start_time
+    global enabled, record, text, fp_start_slot, fp_start_time, last_fp_poll
     enabled = False
     led.value = False
     if len(text) == 0:
@@ -253,7 +262,9 @@ def attest_and_send(end_slot):
     if fp_end_time:
         inner['fingerprintEnd'] = fp_end_time
     inner_json = json.dumps(inner)
+    flash_display()
     encrypted = base64url(nonce + gcm.encrypt(enc_key, nonce, inner_json.encode('utf-8')))
+    flash_display()
 
     sha = hashlib.new('sha256')
     sha.update(text.encode('utf-8'))
@@ -307,6 +318,9 @@ def attest_and_send(end_slot):
         connect_wifi()
     print('Posting to ' + url + '...')
     print()
+    # steady blue while uploading (can't animate inside the blocking post)
+    pixels.fill((0, 0, 40))
+    pixels.show()
     block = ('-----BEGIN KEYWITNESS ATTESTATION-----\n' + encoded +
              '\n-----END KEYWITNESS ATTESTATION-----')
     data = json.dumps({'attestation': block})
@@ -315,6 +329,7 @@ def attest_and_send(end_slot):
             result = response.json()
             print(result)
             print()
+            drain_keyboard()  # anything typed while busy is discarded
             if 'url' in result:
                 # the fragment carries the decryption key to viewers
                 # without it ever reaching the server
@@ -328,8 +343,13 @@ def attest_and_send(end_slot):
                 type_over_host(typed, '[error]')
     except Exception as e:
         print(f'Posting error: {e}')
+        drain_keyboard()
         type_over_host(typed, '[error]')
 
+    pixels.fill((0, 0, 0))
+    pixels.show()
+    drain_keyboard()          # keyboard re-enables only now
+    last_fp_poll = monotonic()  # sensor stays quiet until the next poll tick
     record = ''
     text = ''
     fp_start_slot = None
