@@ -77,9 +77,9 @@ secret_key = getenv('KEYWITNESS_SECRET_KEY')
 public_key = getenv('KEYWITNESS_PUBLIC_KEY')
 unique_id  = f'{board.board_id}-{microcontroller.cpu.uid.hex()}'
 
-# Fingerprint sensor (Adafruit 4690) on UART1:
+# Fingerprint sensor (Adafruit 4690) on the standard UART:
 #   sensor RX (white)  <- D8/GPIO8 (TX)
-#   sensor TX (green)  -> D7/GPIO7 (RX, RP2350 aux UART function)
+#   sensor TX (green)  -> D9/GPIO9 (RX)
 #   sensor VCC (red)   <- D6/GPIO6 (switched so we can power-cycle for the
 #                         boot LED flash; if the sensor browns out on GPIO
 #                         drive, switch VCC through a PNP/P-FET from 5V
@@ -92,7 +92,7 @@ sleep(0.5)  # sensor boot time
 
 finger = None
 try:
-    fp_uart = busio.UART(board.D8, board.D7, baudrate=57600, timeout=1)
+    fp_uart = busio.UART(board.D8, board.D9, baudrate=57600, timeout=1)
     finger = adafruit_fingerprint.Adafruit_Fingerprint(fp_uart)
     print('Fingerprint sensor ready')
 except Exception as e:

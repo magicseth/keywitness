@@ -18,7 +18,7 @@ fp_power.direction = digitalio.Direction.OUTPUT
 fp_power.value = True
 sleep(0.5)
 
-uart = busio.UART(board.D8, board.D7, baudrate=57600, timeout=1)
+uart = busio.UART(board.D8, board.D9, baudrate=57600, timeout=1)
 finger = adafruit_fingerprint.Adafruit_Fingerprint(uart)
 
 
