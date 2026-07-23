@@ -145,6 +145,17 @@ def flash_display():
 def format_time(t):
     return f'{t.tm_year}-{t.tm_mon:02}-{t.tm_mday:02}T{t.tm_hour:02}:{t.tm_min:02}:{t.tm_sec:02}.000Z'
 
+def network_time():
+    """NTP time as an ISO string; the UDP fetch can time out, so retry.
+    Cached by adafruit_ntp for an hour once it succeeds."""
+    for attempt in range(5):
+        try:
+            return format_time(ntp.datetime)
+        except OSError as e:
+            print('NTP retry:', e)
+            sleep(1)
+    raise OSError('NTP unavailable after retries')
+
 def base64url(s):
     if isinstance(s, str):
         s = s.encode('ascii')
@@ -210,7 +221,7 @@ def attest_and_send(end_slot):
 
     # the identity only counts if the SAME enrolled finger started and
     # ended the recording — a mid-session swap gets the anonymous device key
-    fp_end_time = format_time(ntp.datetime) if end_slot is not None else None
+    fp_end_time = network_time() if end_slot is not None else None
     fingerprint_verified = end_slot is not None and end_slot == fp_start_slot
     name, pk, sig_prefix, a_scalar = None, dev_pk, dev_prefix, dev_a
     if fingerprint_verified and end_slot in identities:
@@ -238,7 +249,7 @@ def attest_and_send(end_slot):
     print()
 
     # timestamp
-    timestamp = format_time(ntp.datetime)
+    timestamp = network_time()
     print('Timestamp:', timestamp)
     print()
 
@@ -396,7 +407,7 @@ connect_wifi()
 print('RSSI:', esp.ap_info.rssi)
 print('IP:', esp.ipv4_address)
 print()
-print('Network time:', format_time(ntp.datetime))
+print('Network time:', network_time())
 print()
 print('Ready!')
 print()
@@ -433,7 +444,12 @@ while True:
     # buttons still work: start recording, or send without a fingerprint match
     if not button1.value or not button2.value or not button3.value:
         if enabled:
-            attest_and_send(None)
+            try:
+                attest_and_send(None)
+            except Exception as e:
+                print('Attest failed:', e)
+                pixels.fill((0, 0, 0))
+                pixels.show()
         else:
             fp_start_slot = None
             fp_start_time = None
@@ -455,11 +471,19 @@ while True:
                 fp_touch_ready = False
                 slot = fingerprint_slot()
                 if enabled:
-                    attest_and_send(slot)
+                    try:
+                        attest_and_send(slot)
+                    except Exception as e:
+                        print('Attest failed:', e)
+                        pixels.fill((0, 0, 0))
+                        pixels.show()
                 else:
                     # remember who started; the ending touch must match
                     fp_start_slot = slot
-                    fp_start_time = format_time(ntp.datetime)
+                    try:
+                        fp_start_time = network_time()
+                    except OSError:
+                        fp_start_time = None
                     start_recording()
         elif r == adafruit_fingerprint.NOFINGER:
             fp_touch_ready = True
