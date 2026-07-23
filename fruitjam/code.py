@@ -29,6 +29,7 @@ import adafruit_fingerprint
 import hashlib
 import ed25519
 import gcm
+import sha512
 import adafruit_ntp
 import json
 import binascii
@@ -88,9 +89,10 @@ secret_key = getenv('KEYWITNESS_SECRET_KEY')
 public_key = getenv('KEYWITNESS_PUBLIC_KEY')
 unique_id  = f'{board.board_id}-{microcontroller.cpu.uid.hex()}'
 
-# Device default signing key
-dev_sk = binascii.unhexlify(secret_key.encode('ascii'))
+# Device default signing key, with the slow part of Ed25519 key setup
+# (an SHA-512 of the secret) done once at boot
 dev_pk = binascii.unhexlify(public_key.encode('ascii'))
+dev_prefix, dev_a = ed25519.expand_secret(binascii.unhexlify(secret_key.encode('ascii')))
 
 # Fingerprint slot -> signing identity. Each enrolled person gets their own
 # keypair; the backend maps public key -> claimed username, so a matched
@@ -102,10 +104,11 @@ for _slot in range(1, 200):
     _name = getenv(f'KEYWITNESS_ID_{_slot}_NAME')
     if _name:
         _pk = binascii.unhexlify(getenv(f'KEYWITNESS_ID_{_slot}_PUBLIC_KEY').encode('ascii'))
-        _sk = binascii.unhexlify(getenv(f'KEYWITNESS_ID_{_slot}_SECRET_KEY').encode('ascii'))
-        identities[_slot] = (_name, _pk, _sk)
+        _prefix, _a = ed25519.expand_secret(
+            binascii.unhexlify(getenv(f'KEYWITNESS_ID_{_slot}_SECRET_KEY').encode('ascii')))
+        identities[_slot] = (_name, _pk, _prefix, _a)
 if identities:
-    print('Identities:', ', '.join(f'{s}={n}' for s, (n, _, _) in sorted(identities.items())))
+    print('Identities:', ', '.join(f'{s}={n}' for s, (n, _, _, _) in sorted(identities.items())))
 
 # Fingerprint sensor (Adafruit 4690) on the standard UART:
 #   sensor RX (white)  <- D8/GPIO8 (TX)
@@ -148,6 +151,9 @@ def base64url(s):
     result = binascii.b2a_base64(s).decode('ascii')
     result = result.replace('+', '-').replace('/', '_').replace('=', '').replace('\n', '')
     return result
+
+# random pixel show while the long signing hashes run (called per block)
+sha512.on_block = flash_display
 
 def drain_keyboard():
     """Discard buffered keystrokes — the keyboard is disabled while busy."""
@@ -206,9 +212,9 @@ def attest_and_send(end_slot):
     # ended the recording — a mid-session swap gets the anonymous device key
     fp_end_time = format_time(ntp.datetime) if end_slot is not None else None
     fingerprint_verified = end_slot is not None and end_slot == fp_start_slot
-    name, pk, sk = None, dev_pk, dev_sk
+    name, pk, sig_prefix, a_scalar = None, dev_pk, dev_prefix, dev_a
     if fingerprint_verified and end_slot in identities:
-        name, pk, sk = identities[end_slot]
+        name, pk, sig_prefix, a_scalar = identities[end_slot]
 
     print('Record:', record)
     print()
@@ -282,8 +288,9 @@ def attest_and_send(end_slot):
     print()
 
     # signature — Ed25519 over the canonical payload bytes, with the
-    # matched person's key (or the device key if no identity matched)
-    s = ed25519.signature_unsafe(payload_json.encode('utf-8'), sk, pk)
+    # matched person's key (or the device key if no identity matched);
+    # the key hash was precomputed at boot so this is just the curve math
+    s = ed25519.signature_cached(payload_json.encode('utf-8'), sig_prefix, a_scalar, pk)
     print('Signature:', binascii.hexlify(s).decode('ascii'))
     print()
 
@@ -306,9 +313,6 @@ def attest_and_send(end_slot):
 
     # post — json.dumps escapes the newlines inside the block so the
     # body is valid JSON
-    if not esp.is_connected:
-        print('Wifi dropped; reconnecting...')
-        connect_wifi()
     print('Posting to ' + url + '...')
     print()
     # steady blue while uploading (can't animate inside the blocking post)
@@ -317,26 +321,35 @@ def attest_and_send(end_slot):
     block = ('-----BEGIN KEYWITNESS ATTESTATION-----\n' + encoded +
              '\n-----END KEYWITNESS ATTESTATION-----')
     data = json.dumps({'attestation': block})
-    try:
-        with requests.post(url, data=data, headers={'Content-Type': 'application/json'}, timeout=30) as response:
-            result = response.json()
-            print(result)
-            print()
-            drain_keyboard()  # anything typed while busy is discarded
-            if 'url' in result:
-                # the fragment carries the decryption key to viewers
-                # without it ever reaching the server
-                share_url = (result['url'].replace('https://www.', 'https://')
-                             + '#' + base64url(enc_key))
-                print('Share URL:', share_url)
-                print()
-                credit = ('typed by ' + name + ' ') if name else ''
-                type_over_host(typed, credit + share_url)
-            else:
-                type_over_host(typed, '[error]')
-    except Exception as e:
-        print(f'Posting error: {e}')
-        drain_keyboard()
+
+    # the ESP32 socket occasionally flakes on the first try — retry with
+    # backoff, reconnecting wifi if it dropped, before giving up
+    result = None
+    for attempt in range(3):
+        if not esp.is_connected:
+            print('Wifi dropped; reconnecting...')
+            connect_wifi()
+        try:
+            with requests.post(url, data=data, headers={'Content-Type': 'application/json'}, timeout=30) as response:
+                result = response.json()
+            break
+        except Exception as e:
+            print(f'Post attempt {attempt + 1} failed: {e}')
+            sleep(1 + attempt)
+    print(result)
+    print()
+
+    drain_keyboard()  # anything typed while busy is discarded
+    if result and 'url' in result:
+        # the fragment carries the decryption key to viewers
+        # without it ever reaching the server
+        share_url = (result['url'].replace('https://www.', 'https://')
+                     + '#' + base64url(enc_key))
+        print('Share URL:', share_url)
+        print()
+        credit = ('typed by ' + name + ' ') if name else ''
+        type_over_host(typed, credit + share_url)
+    else:
         type_over_host(typed, '[error]')
 
     pixels.fill((0, 0, 0))
