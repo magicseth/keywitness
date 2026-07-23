@@ -56,8 +56,19 @@ enabled = False
 keyboard = Keyboard(usb_hid.devices)
 layout = KeyboardLayoutUS(keyboard)
 
-ssid = getenv('CIRCUITPY_WIFI_SSID')
-password = getenv('CIRCUITPY_WIFI_PASSWORD')
+# Known wifi networks, tried in order (visible ones first) so the same
+# device works across demo venues. settings.toml:
+#   CIRCUITPY_WIFI_SSID / _PASSWORD          primary network
+#   KEYWITNESS_WIFI_1_SSID / _PASSWORD       extra networks, any count
+#   KEYWITNESS_WIFI_2_SSID / _PASSWORD ...
+networks = []
+if getenv('CIRCUITPY_WIFI_SSID'):
+    networks.append((getenv('CIRCUITPY_WIFI_SSID'), getenv('CIRCUITPY_WIFI_PASSWORD') or ''))
+for _i in range(1, 21):
+    _s = getenv(f'KEYWITNESS_WIFI_{_i}_SSID')
+    if _s:
+        networks.append((_s, getenv(f'KEYWITNESS_WIFI_{_i}_PASSWORD') or ''))
+
 url = 'https://www.keywitness.io/api/attestations'
 
 esp32_cs = digitalio.DigitalInOut(board.ESP_CS)
@@ -77,6 +88,27 @@ secret_key = getenv('KEYWITNESS_SECRET_KEY')
 public_key = getenv('KEYWITNESS_PUBLIC_KEY')
 unique_id  = f'{board.board_id}-{microcontroller.cpu.uid.hex()}'
 
+# Device default signing key, with the slow part of Ed25519 key setup
+# (an SHA-512 of the secret) done once at boot
+dev_pk = binascii.unhexlify(public_key.encode('ascii'))
+dev_prefix, dev_a = ed25519.expand_secret(binascii.unhexlify(secret_key.encode('ascii')))
+
+# Fingerprint slot -> signing identity. Each enrolled person gets their own
+# keypair; the backend maps public key -> claimed username, so a matched
+# finger makes the attestation come out as typed.by/<username>/<n>.
+# settings.toml:
+#   KEYWITNESS_ID_<slot>_NAME / _SECRET_KEY / _PUBLIC_KEY
+identities = {}
+for _slot in range(1, 200):
+    _name = getenv(f'KEYWITNESS_ID_{_slot}_NAME')
+    if _name:
+        _pk = binascii.unhexlify(getenv(f'KEYWITNESS_ID_{_slot}_PUBLIC_KEY').encode('ascii'))
+        _prefix, _a = ed25519.expand_secret(
+            binascii.unhexlify(getenv(f'KEYWITNESS_ID_{_slot}_SECRET_KEY').encode('ascii')))
+        identities[_slot] = (_name, _pk, _prefix, _a)
+if identities:
+    print('Identities:', ', '.join(f'{s}={n}' for s, (n, _, _, _) in sorted(identities.items())))
+
 # Fingerprint sensor (Adafruit 4690) on the standard UART:
 #   sensor RX (white)  <- D8/GPIO8 (TX)
 #   sensor TX (green)  -> D9/GPIO9 (RX)
@@ -92,6 +124,8 @@ except Exception as e:
 
 record = ''
 text = ''
+fp_start_slot = None   # who touched to start recording
+fp_start_time = None
 
 def flash_display():
     global last_flash
@@ -143,27 +177,41 @@ def start_recording():
     if finger:
         flash_sensor()  # LED flash is the "recording" cue
 
-def fingerprint_matches():
-    """The touch image is already captured; template it and search."""
+def fingerprint_slot():
+    """The touch image is already captured; template it and search.
+    Returns the matched slot number, or None."""
     try:
         if finger.image_2_tz(1) != adafruit_fingerprint.OK:
-            return False
-        return finger.finger_search() == adafruit_fingerprint.OK
+            return None
+        if finger.finger_search() != adafruit_fingerprint.OK:
+            return None
+        return finger.finger_id
     except Exception as e:
         print('Fingerprint match error:', e)
-        return False
+        return None
 
-def attest_and_send(fingerprint_verified):
-    global enabled, record, text
+def attest_and_send(end_slot):
+    global enabled, record, text, fp_start_slot, fp_start_time
     enabled = False
     led.value = False
     if len(text) == 0:
+        fp_start_slot = None
+        fp_start_time = None
         return
+
+    # the identity only counts if the SAME enrolled finger started and
+    # ended the recording — a mid-session swap gets the anonymous device key
+    fp_end_time = format_time(ntp.datetime) if end_slot is not None else None
+    fingerprint_verified = end_slot is not None and end_slot == fp_start_slot
+    name, pk, sig_prefix, a_scalar = None, dev_pk, dev_prefix, dev_a
+    if fingerprint_verified and end_slot in identities:
+        name, pk, sig_prefix, a_scalar = identities[end_slot]
 
     print('Record:', record)
     print()
     print('Text:\n\n' + text + '\n')
-    print('Fingerprint verified:', fingerprint_verified)
+    print('Fingerprint start slot:', fp_start_slot, 'end slot:', end_slot,
+          '-> signing as', name if name else 'device key')
     print()
 
     # let the host see progress while the slow crypto runs
@@ -197,7 +245,14 @@ def attest_and_send(fingerprint_verified):
     # which browsers never send to the server
     enc_key = urandom(32)
     nonce = urandom(12)
-    inner_json = json.dumps({'cleartext': text})
+    inner = {'cleartext': text}
+    # start/end touch times ride inside the encrypted evidence — the signed
+    # payload's field set is fixed by the server, but the inner JSON is ours
+    if fp_start_time:
+        inner['fingerprintStart'] = fp_start_time
+    if fp_end_time:
+        inner['fingerprintEnd'] = fp_end_time
+    inner_json = json.dumps(inner)
     encrypted = base64url(nonce + gcm.encrypt(enc_key, nonce, inner_json.encode('utf-8')))
 
     sha = hashlib.new('sha256')
@@ -221,10 +276,10 @@ def attest_and_send(fingerprint_verified):
     print('Payload:', payload_json)
     print()
 
-    # signature — Ed25519 over the canonical payload bytes
-    sk = binascii.unhexlify(secret_key.encode('ascii'))
-    pk = binascii.unhexlify(public_key.encode('ascii'))
-    s  = ed25519.signature_unsafe(payload_json.encode('utf-8'), sk, pk)
+    # signature — Ed25519 over the canonical payload bytes, with the
+    # matched person's key (or the device key if no identity matched);
+    # the key hash was precomputed at boot so this is just the curve math
+    s = ed25519.signature_cached(payload_json.encode('utf-8'), sig_prefix, a_scalar, pk)
     print('Signature:', binascii.hexlify(s).decode('ascii'))
     print()
 
@@ -247,6 +302,9 @@ def attest_and_send(fingerprint_verified):
 
     # post — json.dumps escapes the newlines inside the block so the
     # body is valid JSON
+    if not esp.is_connected:
+        print('Wifi dropped; reconnecting...')
+        connect_wifi()
     print('Posting to ' + url + '...')
     print()
     block = ('-----BEGIN KEYWITNESS ATTESTATION-----\n' + encoded +
@@ -260,10 +318,12 @@ def attest_and_send(fingerprint_verified):
             if 'url' in result:
                 # the fragment carries the decryption key to viewers
                 # without it ever reaching the server
-                share_url = result['url'] + '#' + base64url(enc_key)
+                share_url = (result['url'].replace('https://www.', 'https://')
+                             + '#' + base64url(enc_key))
                 print('Share URL:', share_url)
                 print()
-                type_over_host(typed, share_url)
+                credit = ('typed by ' + name + ' ') if name else ''
+                type_over_host(typed, credit + share_url)
             else:
                 type_over_host(typed, '[error]')
     except Exception as e:
@@ -272,6 +332,33 @@ def attest_and_send(fingerprint_verified):
 
     record = ''
     text = ''
+    fp_start_slot = None
+    fp_start_time = None
+
+def connect_wifi():
+    while not esp.is_connected:
+        # prefer networks the scan can actually see, fall back to trying all
+        candidates = networks
+        try:
+            visible = set()
+            for ap in esp.scan_networks():
+                s = ap.ssid if hasattr(ap, 'ssid') else ap['ssid']
+                if isinstance(s, (bytes, bytearray)):
+                    s = str(s, 'utf-8')
+                visible.add(s)
+            seen = [n for n in networks if n[0] in visible]
+            if seen:
+                candidates = seen
+        except Exception as e:
+            print('Scan failed:', e)
+        for s, p in candidates:
+            try:
+                print('Trying', s, '...')
+                esp.connect_AP(s, p)
+                print('Connected to', s)
+                return
+            except (OSError, RuntimeError) as e:
+                print('Failed:', e)
 
 print()
 if esp.status == adafruit_esp32spi.WL_IDLE_STATUS:
@@ -279,13 +366,7 @@ if esp.status == adafruit_esp32spi.WL_IDLE_STATUS:
 print('Wifi firmware:', esp.firmware_version)
 print('MAC address:', ':'.join('%02X' % byte for byte in esp.MAC_address))
 print('Connecting...')
-while not esp.is_connected:
-    try:
-        esp.connect_AP(ssid, password)
-    except OSError as e:
-        print('Failure; retrying: ', e)
-        continue
-print('Connected to', esp.ap_info.ssid)
+connect_wifi()
 print('RSSI:', esp.ap_info.rssi)
 print('IP:', esp.ipv4_address)
 print()
@@ -295,39 +376,16 @@ print('Ready!')
 print()
 
 last_fp_poll = 0
+last_key = 0
 fp_touch_ready = True  # finger must lift between touch events
 
 while True:
-    # buttons still work: start recording, or send without a fingerprint match
-    if not button1.value or not button2.value or not button3.value:
-        if enabled:
-            attest_and_send(False)
-        else:
-            start_recording()
-        sleep(0.5)
-
-    # fingerprint touch: first touch starts recording (sensor power-cycle
-    # flash is the cue), next touch verifies the finger and sends
-    now = monotonic()
-    if finger and now - last_fp_poll > 0.25:
-        last_fp_poll = now
-        try:
-            r = finger.get_image()
-        except Exception:
-            r = None
-        if r == adafruit_fingerprint.OK:
-            if fp_touch_ready:
-                fp_touch_ready = False
-                if enabled:
-                    attest_and_send(fingerprint_matches())
-                else:
-                    start_recording()
-        elif r == adafruit_fingerprint.NOFINGER:
-            fp_touch_ready = True
-
+    # keystrokes come first so passthrough and the per-key pixel flashes
+    # stay snappy; the sensor poll below blocks the loop for ~100ms
     available = supervisor.runtime.serial_bytes_available
     if available:
         c = sys.stdin.read(available)
+        last_key = monotonic()
         if enabled:
             code = ord(c)
             if (code == 8 or code == 127) and len(text) > 0:
@@ -341,5 +399,40 @@ while True:
             record += '|'
             flash_display()
         layout.write(c)
+        continue
     elif monotonic() - last_flash > 0.25:
         pixels.fill((0, 0, 0))
+
+    # buttons still work: start recording, or send without a fingerprint match
+    if not button1.value or not button2.value or not button3.value:
+        if enabled:
+            attest_and_send(None)
+        else:
+            fp_start_slot = None
+            fp_start_time = None
+            start_recording()
+        sleep(0.5)
+
+    # fingerprint touch: first touch starts recording (LED flash is the cue),
+    # next touch matches the finger and sends. Only polled once typing has
+    # paused, so it never lags the keystroke handling above.
+    now = monotonic()
+    if finger and now - last_fp_poll > 0.25 and now - last_key > 0.5:
+        last_fp_poll = now
+        try:
+            r = finger.get_image()
+        except Exception:
+            r = None
+        if r == adafruit_fingerprint.OK:
+            if fp_touch_ready:
+                fp_touch_ready = False
+                slot = fingerprint_slot()
+                if enabled:
+                    attest_and_send(slot)
+                else:
+                    # remember who started; the ending touch must match
+                    fp_start_slot = slot
+                    fp_start_time = format_time(ntp.datetime)
+                    start_recording()
+        elif r == adafruit_fingerprint.NOFINGER:
+            fp_touch_ready = True

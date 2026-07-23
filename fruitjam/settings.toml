@@ -1,4 +1,16 @@
 CIRCUITPY_WIFI_SSID = ""
 CIRCUITPY_WIFI_PASSWORD = ""
+
+# Extra wifi networks for other venues — visible ones are preferred at boot.
+# KEYWITNESS_WIFI_1_SSID = ""
+# KEYWITNESS_WIFI_1_PASSWORD = ""
+# KEYWITNESS_WIFI_2_SSID = ""
+# KEYWITNESS_WIFI_2_PASSWORD = ""
 KEYWITNESS_SECRET_KEY = "c5aa8df43f9f837bedb7442f31dcb7b166d38535076f094b85ce3a2e0b4458f7"
 KEYWITNESS_PUBLIC_KEY = "fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025"
+
+# Per-fingerprint identities: enroll a finger at slot N (enroll.py), claim a
+# username for its public key, and a matched finger signs as that person.
+# KEYWITNESS_ID_1_NAME = "alice"
+# KEYWITNESS_ID_1_SECRET_KEY = "<32-byte hex>"
+# KEYWITNESS_ID_1_PUBLIC_KEY = "<32-byte hex>"
