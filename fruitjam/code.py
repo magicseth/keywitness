@@ -169,6 +169,24 @@ def drain_keyboard():
     while supervisor.runtime.serial_bytes_available:
         sys.stdin.read(supervisor.runtime.serial_bytes_available)
 
+def power_keyboard_on():
+    """Bring the external keyboard up and signal when it's REALLY ready.
+
+    The keyboard's backlight lights the moment VBUS appears, seconds before
+    enumeration finishes and keys actually pass through — so don't trust it.
+    Wait out enumeration, discard any junk, then blink the pixels green:
+    green means type."""
+    if not usb_host_power:
+        return
+    usb_host_power.value = True
+    sleep(2.0)
+    drain_keyboard()
+    pixels.fill((0, 60, 0))
+    pixels.show()
+    sleep(0.3)
+    pixels.fill((0, 0, 0))
+    pixels.show()
+
 def type_over_host(previous, message):
     """Backspace `previous` out of the host's text field, then type `message`."""
     for _ in range(len(previous)):
@@ -368,8 +386,7 @@ def attest_and_send(end_slot):
     pixels.fill((0, 0, 0))
     pixels.show()
     drain_keyboard()
-    if usb_host_power:
-        usb_host_power.value = True   # keyboard powers back up only now
+    power_keyboard_on()           # keyboard back up; green blink = go
     last_fp_poll = monotonic()  # sensor stays quiet until the next poll tick
     record = ''
     text = ''
@@ -415,8 +432,7 @@ print('Network time:', format_time(ntp.datetime))
 print()
 print('Ready!')
 print()
-if usb_host_power:
-    usb_host_power.value = True   # online — the keyboard may now speak
+power_keyboard_on()   # online — green blink means the keyboard is live
 
 last_fp_poll = 0
 last_key = 0
