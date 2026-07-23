@@ -80,19 +80,11 @@ unique_id  = f'{board.board_id}-{microcontroller.cpu.uid.hex()}'
 # Fingerprint sensor (Adafruit 4690) on the standard UART:
 #   sensor RX (white)  <- D8/GPIO8 (TX)
 #   sensor TX (green)  -> D9/GPIO9 (RX)
-#   sensor VCC (red)   <- D6/GPIO6 (switched so we can power-cycle for the
-#                         boot LED flash; if the sensor browns out on GPIO
-#                         drive, switch VCC through a PNP/P-FET from 5V
-#                         with D6 on the gate instead)
+#   sensor VCC (red)   <- 3.3V
 #   sensor GND (black) <- GND
-fp_power = digitalio.DigitalInOut(board.D6)
-fp_power.direction = digitalio.Direction.OUTPUT
-fp_power.value = True
-sleep(0.5)  # sensor boot time
-
 finger = None
 try:
-    fp_uart = busio.UART(board.D8, board.D9, baudrate=57600, timeout=1)
+    fp_uart = busio.UART(board.TX, board.RX, baudrate=57600, timeout=1)
     finger = adafruit_fingerprint.Adafruit_Fingerprint(fp_uart)
     print('Fingerprint sensor ready')
 except Exception as e:
@@ -132,17 +124,24 @@ def type_over_host(previous, message):
     if message:
         layout.write(message)
 
+def flash_sensor():
+    # each get_image lights the sensor LED (find mode), so a quick burst
+    # reads as a deliberate flash, distinct from the slower idle polling
+    for _ in range(3):
+        try:
+            finger.get_image()
+        except Exception:
+            pass
+        sleep(0.12)
+
 def start_recording():
     global enabled, record, text
     record = ''
     text = ''
     enabled = True
     led.value = True
-    # power-cycle the sensor: its boot LED flash is the "recording" cue
-    fp_power.value = False
-    sleep(0.2)
-    fp_power.value = True
-    sleep(0.6)  # let it boot before we poll it again
+    if finger:
+        flash_sensor()  # LED flash is the "recording" cue
 
 def fingerprint_matches():
     """The touch image is already captured; template it and search."""

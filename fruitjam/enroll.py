@@ -8,17 +8,10 @@
 # code.py's finger_search() matches against whatever slots are stored here.
 
 import board
-import digitalio
 import busio
-from time import sleep
 import adafruit_fingerprint
 
-fp_power = digitalio.DigitalInOut(board.D6)
-fp_power.direction = digitalio.Direction.OUTPUT
-fp_power.value = True
-sleep(0.5)
-
-uart = busio.UART(board.D8, board.D9, baudrate=57600, timeout=1)
+uart = busio.UART(board.TX, board.RX, baudrate=57600, timeout=1)
 finger = adafruit_fingerprint.Adafruit_Fingerprint(uart)
 
 

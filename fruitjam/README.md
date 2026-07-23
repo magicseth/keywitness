@@ -17,13 +17,13 @@ Uses the [Adafruit Basic Fingerprint Sensor (#4690)](https://www.adafruit.com/pr
 
 | Sensor wire | Fruit Jam pin |
 |---|---|
-| VCC (red) | D6/GPIO6 (switched power — lets code.py power-cycle it so the boot LED flash signals "recording"; if it browns out on GPIO drive, switch VCC through a PNP/P-FET from 5V with D6 on the gate) |
+| VCC (red) | 3.3V |
 | GND (black) | GND |
 | TX (green) | D9/GPIO9 (RX) |
 | RX (white) | D8/GPIO8 (TX) |
 
-Touch the sensor to start recording (it power-cycles and flashes), touch it
-again to verify your finger and send. While signing, the device types
+Touch the sensor to start recording (a burst of find-mode captures flashes
+its LED as the cue), touch it again to verify your finger and send. While signing, the device types
 `encrypting` over USB HID, then backspaces it and types the share URL.
 Enroll fingers once from Thonny with `enroll.py`.
 
