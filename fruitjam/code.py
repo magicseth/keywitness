@@ -43,15 +43,6 @@ led = digitalio.DigitalInOut(board.LED)
 led.direction = digitalio.Direction.OUTPUT
 led.value = True
 
-# Keep the external keyboard dark until we're online — anything typed
-# before then would pass through unrecorded. Also cut while attesting.
-usb_host_power = None
-try:
-    usb_host_power = digitalio.DigitalInOut(board.USB_HOST_5V_POWER)
-    usb_host_power.switch_to_output(value=False)
-except Exception as e:
-    print('USB host power control unavailable:', e)
-
 button1 = digitalio.DigitalInOut(board.BUTTON1)
 button1.switch_to_input(pull=digitalio.Pull.UP)
 button2 = digitalio.DigitalInOut(board.BUTTON2)
@@ -169,24 +160,6 @@ def drain_keyboard():
     while supervisor.runtime.serial_bytes_available:
         sys.stdin.read(supervisor.runtime.serial_bytes_available)
 
-def power_keyboard_on():
-    """Bring the external keyboard up and signal when it's REALLY ready.
-
-    The keyboard's backlight lights the moment VBUS appears, seconds before
-    enumeration finishes and keys actually pass through — so don't trust it.
-    Wait out enumeration, discard any junk, then blink the pixels green:
-    green means type."""
-    if not usb_host_power:
-        return
-    usb_host_power.value = True
-    sleep(2.0)
-    drain_keyboard()
-    pixels.fill((0, 60, 0))
-    pixels.show()
-    sleep(0.3)
-    pixels.fill((0, 0, 0))
-    pixels.show()
-
 def type_over_host(previous, message):
     """Backspace `previous` out of the host's text field, then type `message`."""
     for _ in range(len(previous)):
@@ -242,10 +215,6 @@ def attest_and_send(end_slot):
     name, pk, sig_prefix, a_scalar = None, dev_pk, dev_prefix, dev_a
     if fingerprint_verified and end_slot in identities:
         name, pk, sig_prefix, a_scalar = identities[end_slot]
-
-    # keyboard goes dark while we sign and post — no clobbering the output
-    if usb_host_power:
-        usb_host_power.value = False
 
     print('Record:', record)
     print()
@@ -385,8 +354,7 @@ def attest_and_send(end_slot):
 
     pixels.fill((0, 0, 0))
     pixels.show()
-    drain_keyboard()
-    power_keyboard_on()           # keyboard back up; green blink = go
+    drain_keyboard()          # keyboard re-enables only now
     last_fp_poll = monotonic()  # sensor stays quiet until the next poll tick
     record = ''
     text = ''
@@ -432,7 +400,7 @@ print('Network time:', format_time(ntp.datetime))
 print()
 print('Ready!')
 print()
-power_keyboard_on()   # online — green blink means the keyboard is live
+drain_keyboard()   # discard anything typed before we were online
 
 last_fp_poll = 0
 last_key = 0
