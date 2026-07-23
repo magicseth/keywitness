@@ -16,13 +16,14 @@ from adafruit_hid.keyboard_layout_us import KeyboardLayoutUS
 
 # wifi
 from adafruit_esp32spi import adafruit_esp32spi
-from os import getenv
+from os import getenv, urandom
 import adafruit_connection_manager
 import adafruit_requests
 
 # attestation
 import hashlib
 import ed25519
+import gcm
 import adafruit_ntp
 import json
 import binascii
@@ -154,15 +155,30 @@ while True:
             print('DeviceID:', deviceID.hex())
             print()
 
+            # encrypt cleartext (v2) — the server only ever sees the hash and
+            # the AES-GCM ciphertext; the key goes in the share URL fragment,
+            # which browsers never send to the server
+            enc_key = urandom(32)
+            nonce = urandom(12)
+            inner_json = json.dumps({'cleartext': text})
+            encrypted = base64url(nonce + gcm.encrypt(enc_key, nonce, inner_json.encode('utf-8')))
+
+            sha = hashlib.new('sha256')
+            sha.update(text.encode('utf-8'))
+            cleartext_hash = base64url(sha.digest())
+            print('CleartextHash:', cleartext_hash)
+            print()
+
             # payload — must be the JCS canonical form (sorted keys, no
             # whitespace) because the signature is computed over these exact
             # bytes and the server re-canonicalizes before verifying.
             # Built by hand: CircuitPython json.dumps has no sort_keys.
-            payload_json = ('{"cleartext":' + json.dumps(text) +
+            payload_json = ('{"cleartextHash":"' + cleartext_hash + '"' +
                 ',"deviceId":"' + deviceID.hex() + '"' +
+                ',"encryptedCleartext":"' + encrypted + '"' +
                 ',"keystrokeBiometricsHash":"' + biohash + '"' +
                 ',"timestamp":"' + timestamp + '"' +
-                ',"version":1}')
+                ',"version":"keywitness-v2"}')
             print('Payload:', payload_json)
             print()
 
@@ -175,13 +191,14 @@ while True:
 
             # attestation — payload fields plus base64url of the RAW key and
             # signature bytes, keys still in sorted order
-            attest_json = ('{"cleartext":' + json.dumps(text) +
+            attest_json = ('{"cleartextHash":"' + cleartext_hash + '"' +
                 ',"deviceId":"' + deviceID.hex() + '"' +
+                ',"encryptedCleartext":"' + encrypted + '"' +
                 ',"keystrokeBiometricsHash":"' + biohash + '"' +
                 ',"publicKey":"' + base64url(pk) + '"' +
                 ',"signature":"' + base64url(s) + '"' +
                 ',"timestamp":"' + timestamp + '"' +
-                ',"version":1}')
+                ',"version":"keywitness-v2"}')
             print('Attestation:', attest_json)
             print()
 
@@ -199,8 +216,14 @@ while True:
             data = json.dumps({'attestation': block})
             try:
                 with requests.post(url, data=data, headers={'Content-Type': 'application/json'}) as response:
-                    print(response.text)
+                    result = response.json()
+                    print(result)
                     print()
+                    if 'url' in result:
+                        # the fragment carries the decryption key to viewers
+                        # without it ever reaching the server
+                        print('Share URL:', result['url'] + '#' + base64url(enc_key))
+                        print()
             except Exception as e:
                 print(f'Posting error: {e}')
             record = ''
