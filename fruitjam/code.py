@@ -92,7 +92,9 @@ def format_time(t):
     return f'{t.tm_year}-{t.tm_mon:02}-{t.tm_mday:02}T{t.tm_hour:02}:{t.tm_min:02}:{t.tm_sec:02}.000Z'
 
 def base64url(s):
-    result = binascii.b2a_base64(s.encode('ascii')).decode('ascii')
+    if isinstance(s, str):
+        s = s.encode('ascii')
+    result = binascii.b2a_base64(s).decode('ascii')
     result = result.replace('+', '-').replace('/', '_').replace('=', '').replace('\n', '')
     return result
 
@@ -152,31 +154,34 @@ while True:
             print('DeviceID:', deviceID.hex())
             print()
 
-            # payload
-            payload = {
-                'cleartext': text,
-                'deviceId':  deviceID.hex(),
-                'keystrokeBiometricsHash': biohash,
-                'timestamp': timestamp,
-                'version': 1
-            }
-            payload_json = json.dumps(payload)
+            # payload — must be the JCS canonical form (sorted keys, no
+            # whitespace) because the signature is computed over these exact
+            # bytes and the server re-canonicalizes before verifying.
+            # Built by hand: CircuitPython json.dumps has no sort_keys.
+            payload_json = ('{"cleartext":' + json.dumps(text) +
+                ',"deviceId":"' + deviceID.hex() + '"' +
+                ',"keystrokeBiometricsHash":"' + biohash + '"' +
+                ',"timestamp":"' + timestamp + '"' +
+                ',"version":1}')
             print('Payload:', payload_json)
             print()
 
-            # signature
+            # signature — Ed25519 over the canonical payload bytes
             sk = binascii.unhexlify(secret_key.encode('ascii'))
             pk = binascii.unhexlify(public_key.encode('ascii'))
-            m  = binascii.hexlify(text.encode('ascii'))
-            s  = ed25519.signature_unsafe(m, sk, pk)
-            print('Signature:', str(s))
+            s  = ed25519.signature_unsafe(payload_json.encode('utf-8'), sk, pk)
+            print('Signature:', binascii.hexlify(s).decode('ascii'))
             print()
 
-            # attestation
-            attest = payload
-            attest['publicKey'] = base64url(public_key)
-            attest['signature'] = base64url(str(s))
-            attest_json = json.dumps(attest)
+            # attestation — payload fields plus base64url of the RAW key and
+            # signature bytes, keys still in sorted order
+            attest_json = ('{"cleartext":' + json.dumps(text) +
+                ',"deviceId":"' + deviceID.hex() + '"' +
+                ',"keystrokeBiometricsHash":"' + biohash + '"' +
+                ',"publicKey":"' + base64url(pk) + '"' +
+                ',"signature":"' + base64url(s) + '"' +
+                ',"timestamp":"' + timestamp + '"' +
+                ',"version":1}')
             print('Attestation:', attest_json)
             print()
 
@@ -185,10 +190,13 @@ while True:
             print('Base64URL:', encoded)
             print()
 
-            # post
+            # post — json.dumps escapes the newlines inside the block so the
+            # body is valid JSON
             print('Posting to ' + url + '...')
             print()
-            data = f'{{"attestation":"-----BEGIN KEYWITNESS ATTESTATION-----\n{encoded}\n-----END KEYWITNESS ATTESTATION-----"}}'
+            block = ('-----BEGIN KEYWITNESS ATTESTATION-----\n' + encoded +
+                     '\n-----END KEYWITNESS ATTESTATION-----')
+            data = json.dumps({'attestation': block})
             try:
                 with requests.post(url, data=data, headers={'Content-Type': 'application/json'}) as response:
                     print(response.text)
