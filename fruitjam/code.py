@@ -13,12 +13,17 @@ import neopixel
 import usb_hid
 from adafruit_hid.keyboard import Keyboard
 from adafruit_hid.keyboard_layout_us import KeyboardLayoutUS
+from adafruit_hid.keycode import Keycode
 
 # wifi
 from adafruit_esp32spi import adafruit_esp32spi
 from os import getenv, urandom
 import adafruit_connection_manager
 import adafruit_requests
+
+# fingerprint sensor
+import busio
+import adafruit_fingerprint
 
 # attestation
 import hashlib
@@ -72,6 +77,27 @@ secret_key = getenv('KEYWITNESS_SECRET_KEY')
 public_key = getenv('KEYWITNESS_PUBLIC_KEY')
 unique_id  = f'{board.board_id}-{microcontroller.cpu.uid.hex()}'
 
+# Fingerprint sensor (Adafruit 4690) on UART1:
+#   sensor RX (white)  <- D8/GPIO8 (TX)
+#   sensor TX (green)  -> D7/GPIO7 (RX, RP2350 aux UART function)
+#   sensor VCC (red)   <- D6/GPIO6 (switched so we can power-cycle for the
+#                         boot LED flash; if the sensor browns out on GPIO
+#                         drive, switch VCC through a PNP/P-FET from 5V
+#                         with D6 on the gate instead)
+#   sensor GND (black) <- GND
+fp_power = digitalio.DigitalInOut(board.D6)
+fp_power.direction = digitalio.Direction.OUTPUT
+fp_power.value = True
+sleep(0.5)  # sensor boot time
+
+finger = None
+try:
+    fp_uart = busio.UART(board.D8, board.D7, baudrate=57600, timeout=1)
+    finger = adafruit_fingerprint.Adafruit_Fingerprint(fp_uart)
+    print('Fingerprint sensor ready')
+except Exception as e:
+    print('Fingerprint sensor not available:', e)
+
 record = ''
 text = ''
 
@@ -99,6 +125,155 @@ def base64url(s):
     result = result.replace('+', '-').replace('/', '_').replace('=', '').replace('\n', '')
     return result
 
+def type_over_host(previous, message):
+    """Backspace `previous` out of the host's text field, then type `message`."""
+    for _ in range(len(previous)):
+        keyboard.send(Keycode.BACKSPACE)
+    if message:
+        layout.write(message)
+
+def start_recording():
+    global enabled, record, text
+    record = ''
+    text = ''
+    enabled = True
+    led.value = True
+    # power-cycle the sensor: its boot LED flash is the "recording" cue
+    fp_power.value = False
+    sleep(0.2)
+    fp_power.value = True
+    sleep(0.6)  # let it boot before we poll it again
+
+def fingerprint_matches():
+    """The touch image is already captured; template it and search."""
+    try:
+        if finger.image_2_tz(1) != adafruit_fingerprint.OK:
+            return False
+        return finger.finger_search() == adafruit_fingerprint.OK
+    except Exception as e:
+        print('Fingerprint match error:', e)
+        return False
+
+def attest_and_send(fingerprint_verified):
+    global enabled, record, text
+    enabled = False
+    led.value = False
+    if len(text) == 0:
+        return
+
+    print('Record:', record)
+    print()
+    print('Text:\n\n' + text + '\n')
+    print('Fingerprint verified:', fingerprint_verified)
+    print()
+
+    # let the host see progress while the slow crypto runs
+    layout.write('encrypting')
+    typed = 'encrypting'
+
+    # hash record
+    sha = hashlib.new('sha256')
+    sha.update(record.encode('ascii'))
+    digest = sha.digest()
+
+    # biohash
+    biohash = digest.hex()
+    print('Biohash:', biohash)
+    print()
+
+    # timestamp
+    timestamp = format_time(ntp.datetime)
+    print('Timestamp:', timestamp)
+    print()
+
+    # device ID
+    sha = hashlib.new('sha256')
+    sha.update(unique_id.encode('ascii'))
+    deviceID = sha.digest()
+    print('DeviceID:', deviceID.hex())
+    print()
+
+    # encrypt cleartext (v2) — the server only ever sees the hash and
+    # the AES-GCM ciphertext; the key goes in the share URL fragment,
+    # which browsers never send to the server
+    enc_key = urandom(32)
+    nonce = urandom(12)
+    inner_json = json.dumps({'cleartext': text})
+    encrypted = base64url(nonce + gcm.encrypt(enc_key, nonce, inner_json.encode('utf-8')))
+
+    sha = hashlib.new('sha256')
+    sha.update(text.encode('utf-8'))
+    cleartext_hash = base64url(sha.digest())
+    print('CleartextHash:', cleartext_hash)
+    print()
+
+    # payload — must be the JCS canonical form (sorted keys, no
+    # whitespace) because the signature is computed over these exact
+    # bytes and the server re-canonicalizes before verifying.
+    # Built by hand: CircuitPython json.dumps has no sort_keys.
+    fp_json = 'true' if fingerprint_verified else 'false'
+    payload_json = ('{"cleartextHash":"' + cleartext_hash + '"' +
+        ',"deviceId":"' + deviceID.hex() + '"' +
+        ',"encryptedCleartext":"' + encrypted + '"' +
+        ',"faceIdVerified":' + fp_json +
+        ',"keystrokeBiometricsHash":"' + biohash + '"' +
+        ',"timestamp":"' + timestamp + '"' +
+        ',"version":"keywitness-v2"}')
+    print('Payload:', payload_json)
+    print()
+
+    # signature — Ed25519 over the canonical payload bytes
+    sk = binascii.unhexlify(secret_key.encode('ascii'))
+    pk = binascii.unhexlify(public_key.encode('ascii'))
+    s  = ed25519.signature_unsafe(payload_json.encode('utf-8'), sk, pk)
+    print('Signature:', binascii.hexlify(s).decode('ascii'))
+    print()
+
+    # attestation — payload fields plus base64url of the RAW key and
+    # signature bytes, keys still in sorted order
+    attest_json = ('{"cleartextHash":"' + cleartext_hash + '"' +
+        ',"deviceId":"' + deviceID.hex() + '"' +
+        ',"encryptedCleartext":"' + encrypted + '"' +
+        ',"faceIdVerified":' + fp_json +
+        ',"keystrokeBiometricsHash":"' + biohash + '"' +
+        ',"publicKey":"' + base64url(pk) + '"' +
+        ',"signature":"' + base64url(s) + '"' +
+        ',"timestamp":"' + timestamp + '"' +
+        ',"version":"keywitness-v2"}')
+    print('Attestation:', attest_json)
+    print()
+
+    # encode
+    encoded = base64url(attest_json)
+
+    # post — json.dumps escapes the newlines inside the block so the
+    # body is valid JSON
+    print('Posting to ' + url + '...')
+    print()
+    block = ('-----BEGIN KEYWITNESS ATTESTATION-----\n' + encoded +
+             '\n-----END KEYWITNESS ATTESTATION-----')
+    data = json.dumps({'attestation': block})
+    try:
+        with requests.post(url, data=data, headers={'Content-Type': 'application/json'}) as response:
+            result = response.json()
+            print(result)
+            print()
+            if 'url' in result:
+                # the fragment carries the decryption key to viewers
+                # without it ever reaching the server
+                share_url = result['url'] + '#' + base64url(enc_key)
+                print('Share URL:', share_url)
+                print()
+                type_over_host(typed, share_url)
+            else:
+                type_over_host(typed, '[error]')
+    except Exception as e:
+        print(f'Posting error: {e}')
+        type_over_host(typed, '[error]')
+
+    record = ''
+    text = ''
+
 print()
 if esp.status == adafruit_esp32spi.WL_IDLE_STATUS:
     print('ESP32 wireless co-proc found and in idle mode')
@@ -120,117 +295,36 @@ print()
 print('Ready!')
 print()
 
+last_fp_poll = 0
+fp_touch_ready = True  # finger must lift between touch events
+
 while True:
+    # buttons still work: start recording, or send without a fingerprint match
     if not button1.value or not button2.value or not button3.value:
-        if enabled and len(text) > 0:
-            print('Record:', record)
-            print()
-            print('Text:\n\n' + text + '\n')
-
-            # hash record
-            sha = hashlib.new('sha256')
-            sha.update(record.encode('ascii'))
-            digest = sha.digest()
-            print('Digest:', digest.hex())
-            print()
-
-            # biohash
-            biohash = ''
-            hexLc = '0123456789abcdef'
-            for i in range(32):
-                biohash += hexLc[digest[i] >> 4]
-                biohash += hexLc[digest[i] & 0x0f]
-            print('Biohash:', biohash) #.hex())
-            print()
-
-            # timestamp
-            timestamp = format_time(ntp.datetime)
-            print('Timestamp:', timestamp)
-            print()
-
-            # device ID
-            sha = hashlib.new('sha256')
-            sha.update(unique_id.encode('ascii'))
-            deviceID = sha.digest()
-            print('DeviceID:', deviceID.hex())
-            print()
-
-            # encrypt cleartext (v2) — the server only ever sees the hash and
-            # the AES-GCM ciphertext; the key goes in the share URL fragment,
-            # which browsers never send to the server
-            enc_key = urandom(32)
-            nonce = urandom(12)
-            inner_json = json.dumps({'cleartext': text})
-            encrypted = base64url(nonce + gcm.encrypt(enc_key, nonce, inner_json.encode('utf-8')))
-
-            sha = hashlib.new('sha256')
-            sha.update(text.encode('utf-8'))
-            cleartext_hash = base64url(sha.digest())
-            print('CleartextHash:', cleartext_hash)
-            print()
-
-            # payload — must be the JCS canonical form (sorted keys, no
-            # whitespace) because the signature is computed over these exact
-            # bytes and the server re-canonicalizes before verifying.
-            # Built by hand: CircuitPython json.dumps has no sort_keys.
-            payload_json = ('{"cleartextHash":"' + cleartext_hash + '"' +
-                ',"deviceId":"' + deviceID.hex() + '"' +
-                ',"encryptedCleartext":"' + encrypted + '"' +
-                ',"keystrokeBiometricsHash":"' + biohash + '"' +
-                ',"timestamp":"' + timestamp + '"' +
-                ',"version":"keywitness-v2"}')
-            print('Payload:', payload_json)
-            print()
-
-            # signature — Ed25519 over the canonical payload bytes
-            sk = binascii.unhexlify(secret_key.encode('ascii'))
-            pk = binascii.unhexlify(public_key.encode('ascii'))
-            s  = ed25519.signature_unsafe(payload_json.encode('utf-8'), sk, pk)
-            print('Signature:', binascii.hexlify(s).decode('ascii'))
-            print()
-
-            # attestation — payload fields plus base64url of the RAW key and
-            # signature bytes, keys still in sorted order
-            attest_json = ('{"cleartextHash":"' + cleartext_hash + '"' +
-                ',"deviceId":"' + deviceID.hex() + '"' +
-                ',"encryptedCleartext":"' + encrypted + '"' +
-                ',"keystrokeBiometricsHash":"' + biohash + '"' +
-                ',"publicKey":"' + base64url(pk) + '"' +
-                ',"signature":"' + base64url(s) + '"' +
-                ',"timestamp":"' + timestamp + '"' +
-                ',"version":"keywitness-v2"}')
-            print('Attestation:', attest_json)
-            print()
-
-            # encode
-            encoded = base64url(attest_json)
-            print('Base64URL:', encoded)
-            print()
-
-            # post — json.dumps escapes the newlines inside the block so the
-            # body is valid JSON
-            print('Posting to ' + url + '...')
-            print()
-            block = ('-----BEGIN KEYWITNESS ATTESTATION-----\n' + encoded +
-                     '\n-----END KEYWITNESS ATTESTATION-----')
-            data = json.dumps({'attestation': block})
-            try:
-                with requests.post(url, data=data, headers={'Content-Type': 'application/json'}) as response:
-                    result = response.json()
-                    print(result)
-                    print()
-                    if 'url' in result:
-                        # the fragment carries the decryption key to viewers
-                        # without it ever reaching the server
-                        print('Share URL:', result['url'] + '#' + base64url(enc_key))
-                        print()
-            except Exception as e:
-                print(f'Posting error: {e}')
-            record = ''
-            text = ''
-        led.value = enabled
-        enabled = not enabled
+        if enabled:
+            attest_and_send(False)
+        else:
+            start_recording()
         sleep(0.5)
+
+    # fingerprint touch: first touch starts recording (sensor power-cycle
+    # flash is the cue), next touch verifies the finger and sends
+    now = monotonic()
+    if finger and now - last_fp_poll > 0.25:
+        last_fp_poll = now
+        try:
+            r = finger.get_image()
+        except Exception:
+            r = None
+        if r == adafruit_fingerprint.OK:
+            if fp_touch_ready:
+                fp_touch_ready = False
+                if enabled:
+                    attest_and_send(fingerprint_matches())
+                else:
+                    start_recording()
+        elif r == adafruit_fingerprint.NOFINGER:
+            fp_touch_ready = True
 
     available = supervisor.runtime.serial_bytes_available
     if available:
