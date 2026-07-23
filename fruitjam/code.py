@@ -43,6 +43,15 @@ led = digitalio.DigitalInOut(board.LED)
 led.direction = digitalio.Direction.OUTPUT
 led.value = True
 
+# Keep the external keyboard dark until we're online — anything typed
+# before then would pass through unrecorded. Also cut while attesting.
+usb_host_power = None
+try:
+    usb_host_power = digitalio.DigitalInOut(board.USB_HOST_5V_POWER)
+    usb_host_power.switch_to_output(value=False)
+except Exception as e:
+    print('USB host power control unavailable:', e)
+
 button1 = digitalio.DigitalInOut(board.BUTTON1)
 button1.switch_to_input(pull=digitalio.Pull.UP)
 button2 = digitalio.DigitalInOut(board.BUTTON2)
@@ -216,6 +225,10 @@ def attest_and_send(end_slot):
     if fingerprint_verified and end_slot in identities:
         name, pk, sig_prefix, a_scalar = identities[end_slot]
 
+    # keyboard goes dark while we sign and post — no clobbering the output
+    if usb_host_power:
+        usb_host_power.value = False
+
     print('Record:', record)
     print()
     print('Text:\n\n' + text + '\n')
@@ -354,7 +367,9 @@ def attest_and_send(end_slot):
 
     pixels.fill((0, 0, 0))
     pixels.show()
-    drain_keyboard()          # keyboard re-enables only now
+    drain_keyboard()
+    if usb_host_power:
+        usb_host_power.value = True   # keyboard powers back up only now
     last_fp_poll = monotonic()  # sensor stays quiet until the next poll tick
     record = ''
     text = ''
@@ -400,6 +415,8 @@ print('Network time:', format_time(ntp.datetime))
 print()
 print('Ready!')
 print()
+if usb_host_power:
+    usb_host_power.value = True   # online — the keyboard may now speak
 
 last_fp_poll = 0
 last_key = 0
