@@ -590,7 +590,7 @@ def attest_and_send(end_slot):
     for attempt in range(3):
         if not esp.is_connected:
             print('Wifi dropped; reconnecting...')
-            connect_wifi()
+            connect_wifi(deadline_s=25)
         wd = None
         if watchdog:
             try:
@@ -624,7 +624,7 @@ def attest_and_send(end_slot):
                 sleep(1)
             except Exception as e:
                 print('ESP reset failed:', e)
-            connect_wifi()
+            connect_wifi(deadline_s=25)
     print(result)
     print()
 
@@ -652,20 +652,43 @@ def attest_and_send(end_slot):
     fp_start_slot = None
     fp_start_time = None
 
-def connect_wifi():
-    # narrate over HID with an animated ellipsis, erased once we're online
+def connect_wifi(deadline_s=None):
+    """Join a known network, narrating over HID with an animated ellipsis.
+
+    Unbounded at boot (deadline_s=None); bounded during an attestation so a
+    dead venue network fails the send instead of trapping the device on the
+    upload state forever. A RAISE-mode watchdog preempts scan/connect calls
+    that wedge (the ESP32 can hang inside connect_AP with no timeout)."""
     banner = 'connecting to wifi'
     sound_loop(snd_modem)
     layout.write(banner)
     dots = 0
+    wd = None
+    if watchdog:
+        try:
+            wd = microcontroller.watchdog
+            wd.timeout = 8
+            wd.mode = watchdog.WatchDogMode.RAISE
+        except Exception:
+            wd = None
     try:
-        dots = _connect_wifi()
+        dots = _connect_wifi(monotonic() + deadline_s if deadline_s else None, wd)
     finally:
+        if wd:
+            try:
+                wd.deinit()
+            except Exception:
+                pass
         for _ in range(len(banner) + dots):
             keyboard.send(Keycode.BACKSPACE)
         sound_stop()
 
-def _dot_tick(dots):
+def _dot_tick(dots, wd):
+    if wd:
+        try:
+            wd.feed()
+        except Exception:
+            pass
     if dots < 3:
         layout.write('.')
         return dots + 1
@@ -673,10 +696,12 @@ def _dot_tick(dots):
         keyboard.send(Keycode.BACKSPACE)
     return 0
 
-def _connect_wifi():
+def _connect_wifi(deadline, wd):
     dots = 0
     while not esp.is_connected:
-        dots = _dot_tick(dots)
+        if deadline and monotonic() > deadline:
+            raise OSError('wifi: no known network reachable')
+        dots = _dot_tick(dots, wd)
         # prefer networks the scan can actually see, fall back to trying all
         candidates = networks
         try:
@@ -692,13 +717,14 @@ def _connect_wifi():
         except Exception as e:
             print('Scan failed:', e)
         for s, p in candidates:
-            dots = _dot_tick(dots)
+            dots = _dot_tick(dots, wd)
             try:
                 print('Trying', s, '...')
                 esp.connect_AP(s, p)
                 print('Connected to', s)
                 return dots
-            except (OSError, RuntimeError) as e:
+            except Exception as e:
+                # includes WatchDogTimeout from a wedged connect_AP
                 print('Failed:', e)
     return dots
 
