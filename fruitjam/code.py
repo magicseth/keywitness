@@ -298,7 +298,7 @@ for _i, (_d, _s) in enumerate(zip('1234567890', '!@#$%^&*()')):
     _KEYS_LOWER[30 + _i] = _d
     _KEYS_UPPER[30 + _i] = _s
 
-def keyboard_attach(timeout_s=6.0):
+def keyboard_attach(timeout_s=3.0):
     """Find a boot keyboard on the host port and claim it."""
     global kbd, kbd_ep, kbd_prev
     kbd = None
@@ -322,7 +322,15 @@ def keyboard_attach(timeout_s=6.0):
                                 device.set_configuration()
                         except Exception as e:
                             print('Keyboard claim step', step, 'error:', e)
-                    # prove the pipe works before declaring victory
+                    # some dongles also want boot protocol + idle set
+                    try:
+                        device.ctrl_transfer(0x21, 0x0B, 0, idx)  # SET_PROTOCOL boot
+                        device.ctrl_transfer(0x21, 0x0A, 0, idx)  # SET_IDLE
+                    except Exception:
+                        pass
+                    # prove the pipe works before declaring victory; if it
+                    # won't talk, bail out NOW — retrying only re-detaches
+                    # the driver the console-routing fallback relies on
                     probe = array.array('b', [0] * 8)
                     try:
                         device.read(ep, probe, timeout=120)
@@ -330,7 +338,7 @@ def keyboard_attach(timeout_s=6.0):
                         pass  # no keys pressed — pipe is fine
                     except Exception as e:
                         print('Keyboard probe failed:', e)
-                        continue
+                        return False
                     kbd = device
                     kbd_ep = ep
                     return True
@@ -374,9 +382,8 @@ def keyboard_on():
         sleep(1.0)
     drain_keyboard()
     if usb is not None and not keyboard_attach():
-        # console routing may still deliver keys, so this is a warning,
-        # not a dead end — typing might work anyway
-        layout.write('[keyboard direct-claim failed - trying anyway] ')
+        # console routing usually still delivers, a few seconds later
+        layout.write('[keyboard warming up] ')
 
 def keyboard_off():
     global kbd
