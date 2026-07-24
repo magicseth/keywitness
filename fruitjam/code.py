@@ -25,6 +25,14 @@ import adafruit_requests
 import busio
 import adafruit_fingerprint
 
+# external keyboard, read directly over USB host
+import array
+try:
+    import usb.core
+    import adafruit_usb_host_descriptors
+except ImportError:
+    usb = None  # simulator / no USB host support
+
 # attestation
 import hashlib
 import ed25519
@@ -266,22 +274,102 @@ def base64url(s):
 # random pixel show while the long signing hashes run (called per block)
 sha512.on_block = flash_display
 
+# ── Direct USB-host keyboard input ───────────────────────────────────────────
+# CircuitPython's built-in keyboard→console routing doesn't reliably re-attach
+# after the host port is power-cycled, so we claim the keyboard ourselves and
+# read boot-protocol HID reports directly. Console stdin still works as a
+# fallback input (and is how the simulator types).
+
+kbd = None
+kbd_ep = None
+kbd_buf = array.array('b', [0] * 8)
+kbd_prev = set()
+
+_KEYS_LOWER = {40: '\n', 42: '\x08', 43: '\t', 44: ' ', 45: '-', 46: '=',
+               47: '[', 48: ']', 49: '\\', 51: ';', 52: "'", 53: '`',
+               54: ',', 55: '.', 56: '/'}
+_KEYS_UPPER = {40: '\n', 42: '\x08', 43: '\t', 44: ' ', 45: '_', 46: '+',
+               47: '{', 48: '}', 49: '|', 51: ':', 52: '"', 53: '~',
+               54: '<', 55: '>', 56: '?'}
+for _i in range(26):
+    _KEYS_LOWER[4 + _i] = chr(ord('a') + _i)
+    _KEYS_UPPER[4 + _i] = chr(ord('A') + _i)
+for _i, (_d, _s) in enumerate(zip('1234567890', '!@#$%^&*()')):
+    _KEYS_LOWER[30 + _i] = _d
+    _KEYS_UPPER[30 + _i] = _s
+
+def keyboard_attach(timeout_s=6.0):
+    """Find a boot keyboard on the host port and claim it."""
+    global kbd, kbd_ep, kbd_prev
+    kbd = None
+    kbd_prev = set()
+    if usb is None:
+        return False
+    deadline = monotonic() + timeout_s
+    while monotonic() < deadline:
+        try:
+            for device in usb.core.find(find_all=True):
+                idx, ep = adafruit_usb_host_descriptors.find_boot_keyboard_endpoint(device)
+                if idx is not None and ep is not None:
+                    if device.is_kernel_driver_active(idx):
+                        device.detach_kernel_driver(idx)
+                    device.set_configuration()
+                    kbd = device
+                    kbd_ep = ep
+                    return True
+        except Exception as e:
+            print('Keyboard scan error:', e)
+        sleep(0.3)
+    return False
+
+def keyboard_read():
+    """Newly pressed characters from the claimed keyboard ('' if none)."""
+    global kbd_prev, kbd
+    if not kbd:
+        return ''
+    try:
+        kbd.read(kbd_ep, kbd_buf, timeout=5)
+    except usb.core.USBTimeoutError:
+        return ''
+    except Exception as e:
+        print('Keyboard read error:', e)
+        kbd = None
+        return ''
+    shift = bool(kbd_buf[0] & 0x22)
+    table = _KEYS_UPPER if shift else _KEYS_LOWER
+    keys = set(k & 0xFF for k in kbd_buf[2:8] if k)
+    out = ''.join(table.get(k, '') for k in keys - kbd_prev)
+    kbd_prev = keys
+    return out
+
 def drain_keyboard():
     """Discard buffered keystrokes — the keyboard is disabled while busy."""
     while supervisor.runtime.serial_bytes_available:
         sys.stdin.read(supervisor.runtime.serial_bytes_available)
+    for _ in range(8):
+        if not keyboard_read():
+            break
 
 def keyboard_on():
-    """Power the external keyboard and wait for it to enumerate."""
+    """Power the external keyboard, claim it, and narrate failure over HID."""
     if usb_host_power:
         usb_host_power.value = True
-        sleep(2.0)
+        sleep(1.0)
+    if usb is not None and not keyboard_attach():
+        layout.write('[keyboard not found] ')
     drain_keyboard()
 
 def keyboard_off():
+    global kbd
     if usb_host_power:
         usb_host_power.value = False
+    kbd = None
     drain_keyboard()
+
+def type_error(e):
+    # narrate failures over the HID channel so problems are visible
+    # without a serial console
+    layout.write(' [error: ' + str(e)[:48] + ']')
 
 def type_over_host(previous, message):
     """Backspace `previous` out of the host's text field, then type `message`."""
@@ -561,23 +649,28 @@ fp_touch_ready = True  # finger must lift between touch events
 while True:
     # keystrokes come first so passthrough and the per-key pixel flashes
     # stay snappy; the sensor poll below blocks the loop for ~100ms
-    available = supervisor.runtime.serial_bytes_available
-    if available:
-        c = sys.stdin.read(available)
+    chars = keyboard_read()
+    if supervisor.runtime.serial_bytes_available:
+        chars += sys.stdin.read(supervisor.runtime.serial_bytes_available)
+    if chars:
         last_key = monotonic()
-        if enabled:
+        for c in chars:
             code = ord(c)
-            if (code == 8 or code == 127) and len(text) > 0:
-                text = text[:-1]
-            elif code >= 32 and code <= 127:
-                text += c
-            if len(record) == 0:
-                record += str(code) + ',0'
+            if enabled:
+                if (code == 8 or code == 127) and len(text) > 0:
+                    text = text[:-1]
+                elif code >= 32 and code <= 127:
+                    text += c
+                if len(record) == 0:
+                    record += str(code) + ',0'
+                else:
+                    record += str(code) + ',' + str(int((monotonic() - last_flash) * 1000))
+                record += '|'
+                flash_display()
+            if code == 8 or code == 127:
+                keyboard.send(Keycode.BACKSPACE)
             else:
-                record += str(code) + ',' + str(int((monotonic() - last_flash) * 1000))
-            record += '|'
-            flash_display()
-        layout.write(c)
+                layout.write(c)
         continue
     elif monotonic() - last_flash > 0.25:
         pixels.fill((0, 0, 0))
@@ -590,6 +683,7 @@ while True:
             except Exception as e:
                 print('Attest failed:', e)
                 sound_stop()
+                type_error(e)
                 pixels.fill((0, 0, 0))
                 pixels.show()
         else:
@@ -626,6 +720,7 @@ while True:
                     except Exception as e:
                         print('Attest failed:', e)
                         sound_stop()
+                        type_error(e)
                         pixels.fill((0, 0, 0))
                         pixels.show()
                 else:
