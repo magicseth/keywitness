@@ -460,6 +460,40 @@ def fingerprint_slot():
         print('Fingerprint match error:', e)
         return None
 
+def _wd_arm():
+    if not watchdog:
+        return None
+    try:
+        wd = microcontroller.watchdog
+        wd.timeout = 8
+        wd.mode = watchdog.WatchDogMode.RAISE
+        return wd
+    except Exception as e:
+        print('Watchdog unavailable:', e)
+        return None
+
+def _wd_off(wd):
+    if wd:
+        try:
+            wd.deinit()
+        except Exception:
+            pass
+
+def warm_tls():
+    """Prime the TLS connection: a cold handshake alone can eat a whole
+    watchdog window, so do it separately and let the post ride the warm
+    socket."""
+    wd = _wd_arm()
+    try:
+        with requests.get('https://typed.by/api/trust/minimum-version', timeout=6) as r:
+            r.text
+        return True
+    except Exception as e:
+        print('TLS warm-up failed:', e)
+        return False
+    finally:
+        _wd_off(wd)
+
 def attest_and_send(end_slot):
     global enabled, record, text, fp_start_slot, fp_start_time, last_fp_poll
     enabled = False
@@ -615,40 +649,33 @@ def attest_and_send(end_slot):
         if not esp.is_connected:
             print('Wifi dropped; reconnecting...')
             connect_wifi(deadline_s=25)
-        wd = None
-        if watchdog:
-            try:
-                wd = microcontroller.watchdog
-                wd.timeout = 8
-                wd.mode = watchdog.WatchDogMode.RAISE
-            except Exception as e:
-                wd = None
-                print('Watchdog unavailable:', e)
+            warm_tls()
+        wd = _wd_arm()
         try:
             with requests.post(url, data=data, headers={'Content-Type': 'application/json'}, timeout=6) as response:
                 result = response.json()
         except Exception as e:
             print(f'Post attempt {attempt + 1} failed: {e}')
         finally:
-            if wd:
-                try:
-                    wd.deinit()
-                except Exception:
-                    pass
+            _wd_off(wd)
         if result is not None:
             break
         if attempt < 2:
-            print('Resetting wifi co-processor...')
             try:
                 adafruit_connection_manager.connection_manager_close_all(pool)
             except Exception as e:
                 print('Socket cleanup failed:', e)
-            try:
-                esp.reset()
-                sleep(1)
-            except Exception as e:
-                print('ESP reset failed:', e)
-            connect_wifi(deadline_s=25)
+            # only reset the radio if wifi is actually down — resetting a
+            # healthy connection was itself causing mid-upload disconnects
+            if not esp.is_connected:
+                print('Resetting wifi co-processor...')
+                try:
+                    esp.reset()
+                    sleep(1)
+                except Exception as e:
+                    print('ESP reset failed:', e)
+                connect_wifi(deadline_s=25)
+            warm_tls()
     print(result)
     print()
 
@@ -764,6 +791,7 @@ print('IP:', esp.ipv4_address)
 print()
 print('Network time:', network_time())
 print()
+warm_tls()      # prime the TLS session so the first send is fast
 sensor_init()   # only now — online — does the sensor wake up
 print('Ready!')
 print()
@@ -804,8 +832,12 @@ while True:
                 flash_display()
             if code == 8 or code == 127:
                 keyboard.send(Keycode.BACKSPACE)
-            else:
+            elif code == 13:
+                layout.write('\n')
+            elif code == 9 or code == 10 or 32 <= code <= 126:
                 layout.write(c)
+            # anything else is a control char the layout can't type —
+            # passing it through would raise and kill the app
         continue
     elif monotonic() - last_flash > 0.25:
         pixels.fill((0, 0, 0))
