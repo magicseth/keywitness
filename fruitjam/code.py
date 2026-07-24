@@ -311,9 +311,26 @@ def keyboard_attach(timeout_s=6.0):
             for device in usb.core.find(find_all=True):
                 idx, ep = adafruit_usb_host_descriptors.find_boot_keyboard_endpoint(device)
                 if idx is not None and ep is not None:
-                    if device.is_kernel_driver_active(idx):
-                        device.detach_kernel_driver(idx)
-                    device.set_configuration()
+                    # quirky (esp. wireless-dongle) keyboards need the config
+                    # set both before and after the kernel-driver detach
+                    for step in ('config', 'detach', 'config'):
+                        try:
+                            if step == 'detach':
+                                if device.is_kernel_driver_active(idx):
+                                    device.detach_kernel_driver(idx)
+                            else:
+                                device.set_configuration()
+                        except Exception as e:
+                            print('Keyboard claim step', step, 'error:', e)
+                    # prove the pipe works before declaring victory
+                    probe = array.array('b', [0] * 8)
+                    try:
+                        device.read(ep, probe, timeout=120)
+                    except usb.core.USBTimeoutError:
+                        pass  # no keys pressed — pipe is fine
+                    except Exception as e:
+                        print('Keyboard probe failed:', e)
+                        continue
                     kbd = device
                     kbd_ep = ep
                     return True
@@ -355,9 +372,11 @@ def keyboard_on():
     if usb_host_power:
         usb_host_power.value = True
         sleep(1.0)
-    if usb is not None and not keyboard_attach():
-        layout.write('[keyboard not found] ')
     drain_keyboard()
+    if usb is not None and not keyboard_attach():
+        # console routing may still deliver keys, so this is a warning,
+        # not a dead end — typing might work anyway
+        layout.write('[keyboard direct-claim failed - trying anyway] ')
 
 def keyboard_off():
     global kbd
