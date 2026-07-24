@@ -94,7 +94,7 @@ for _i in range(1, 21):
     if _s:
         networks.append((_s, getenv(f'KEYWITNESS_WIFI_{_i}_PASSWORD') or ''))
 
-url = 'https://www.keywitness.io/api/attestations'
+url = 'https://typed.by/api/attestations'
 
 esp32_cs = digitalio.DigitalInOut(board.ESP_CS)
 esp32_ready = digitalio.DigitalInOut(board.ESP_BUSY)
@@ -229,13 +229,19 @@ if identities:
 #   sensor TX (green)  -> D9/GPIO9 (RX)
 #   sensor VCC (red)   <- 3.3V
 #   sensor GND (black) <- GND
+# Initialized only after wifi is up (see boot sequence) so the sensor
+# stays silent until the device can actually do something with a touch.
 finger = None
-try:
-    fp_uart = busio.UART(board.TX, board.RX, baudrate=57600, timeout=1)
-    finger = adafruit_fingerprint.Adafruit_Fingerprint(fp_uart)
-    print('Fingerprint sensor ready')
-except Exception as e:
-    print('Fingerprint sensor not available:', e)
+fp_uart = None
+
+def sensor_init():
+    global finger, fp_uart
+    try:
+        fp_uart = busio.UART(board.TX, board.RX, baudrate=57600, timeout=1)
+        finger = adafruit_fingerprint.Adafruit_Fingerprint(fp_uart)
+        print('Fingerprint sensor ready')
+    except Exception as e:
+        print('Fingerprint sensor not available:', e)
 
 record = ''
 text = ''
@@ -418,6 +424,7 @@ def type_over_host(previous, message):
 
 def start_recording():
     global enabled, record, text
+    print('Recording started')
     record = ''
     text = ''
     enabled = True
@@ -453,6 +460,8 @@ def attest_and_send(end_slot):
     led.value = False
     keyboard_off()   # dark through encryption and upload
     if len(text) == 0:
+        print('Recording ended with no text (end slot:', end_slot, ')')
+        layout.write('[no keys captured] ')
         fp_start_slot = None
         fp_start_time = None
         return
@@ -705,6 +714,7 @@ print('IP:', esp.ipv4_address)
 print()
 print('Network time:', network_time())
 print()
+sensor_init()   # only now — online — does the sensor wake up
 print('Ready!')
 print()
 # keyboard stays dark until a touch starts a recording
@@ -752,6 +762,7 @@ while True:
 
     # buttons still work: start recording, or send without a fingerprint match
     if not button1.value or not button2.value or not button3.value:
+        print('Button press: b1=%s b2=%s b3=%s enabled=%s' % (not button1.value, not button2.value, not button3.value, enabled))
         if enabled:
             try:
                 attest_and_send(None)
@@ -789,6 +800,7 @@ while True:
             if fp_touch_ready:
                 fp_touch_ready = False
                 slot = fingerprint_slot()
+                print('Touch: slot', slot, 'enabled=', enabled)
                 if enabled:
                     try:
                         attest_and_send(slot)
