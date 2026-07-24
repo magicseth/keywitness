@@ -39,7 +39,7 @@ def scenario(sim, args):
             sim.press_button()
         else:
             sim.touch(int(args.start_slot))
-        time.sleep(0.8)
+        time.sleep(3.5)  # keyboard_on enumeration wait before typing
 
         sim.type(args.text)
         time.sleep(1.2)

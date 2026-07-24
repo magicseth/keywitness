@@ -84,7 +84,7 @@ def install(sim):
             return f"<Pin {self.name}>"
 
     for name in ("LED", "BUTTON1", "BUTTON2", "BUTTON3", "NEOPIXEL",
-                 "TX", "RX", "ESP_CS", "ESP_BUSY", "ESP_RESET", "D6", "D7", "D8", "D9"):
+                 "TX", "RX", "ESP_CS", "ESP_BUSY", "ESP_RESET", "USB_HOST_5V_POWER", "D6", "D7", "D8", "D9"):
         setattr(board, name, Pin(name))
     board.board_id = "fruitjam_simulator"
     board.SPI = lambda: None

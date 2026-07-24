@@ -43,9 +43,9 @@ led = digitalio.DigitalInOut(board.LED)
 led.direction = digitalio.Direction.OUTPUT
 led.value = True
 
-# Keep the external keyboard unpowered until we're online, so its backlight
-# honestly signals "ready" — no typing into the void during wifi connect.
-# (Boot-time only: it stays powered during attestations; input is drained.)
+# The external keyboard is only powered while recording: touch the sensor
+# and the keyboard lighting up IS the record indicator. It goes dark again
+# the moment the ending touch lands, through encryption and upload.
 usb_host_power = None
 try:
     usb_host_power = digitalio.DigitalInOut(board.USB_HOST_5V_POWER)
@@ -94,6 +94,77 @@ ssl_context = adafruit_connection_manager.get_radio_ssl_context(esp)
 requests = adafruit_requests.Session(pool, ssl_context)
 
 ntp = adafruit_ntp.NTP(pool, cache_seconds=3600)
+
+# ── Audio: modem song while connecting, beep-boop while encrypting, and a
+# paper-airplane swoosh on send. Samples are DMA-looped, so they keep playing
+# while the CPU is buried in crypto or a blocking upload. Must be set up
+# AFTER the ESP32 (initializing the ESP after I2S breaks audio — CP #10461).
+audio_out = None
+snd_modem = snd_working = snd_swoosh = None
+try:
+    import audiobusio
+    import audiocore
+    import adafruit_tlv320
+    import array
+    import math
+
+    _dac = adafruit_tlv320.TLV320DAC3100(board.I2C())
+    _dac.configure_clocks(sample_rate=22050, bit_depth=16)
+    _dac.speaker_output = True
+    _dac.speaker_volume = -16  # dB
+
+    _RATE = 22050
+    _TAU = 2 * math.pi
+
+    def _tone(period, seconds, vol=0.5):
+        # one exact cycle tiled — freq = 22050/period, phase-continuous
+        cycle = [int(32000 * vol * math.sin(_TAU * i / period)) for i in range(period)]
+        return cycle * int(_RATE * seconds / period)
+
+    def _silence(seconds):
+        return [0] * int(_RATE * seconds)
+
+    def _static(seconds, vol=0.35):
+        peak = int(32000 * vol)
+        return [randint(-peak, peak) for _ in range(int(_RATE * seconds))]
+
+    def _sample(data):
+        return audiocore.RawSample(array.array('h', data), sample_rate=_RATE)
+
+    # dial-up handshake pastiche (loops)
+    snd_modem = _sample(
+        _tone(17, 0.25) + _tone(10, 0.2) + _static(0.2) +
+        _tone(22, 0.25) + _tone(10, 0.15) + _static(0.15))
+
+    # beep ... boop ... (loops)
+    snd_working = _sample(
+        _tone(25, 0.12) + _silence(0.13) + _tone(50, 0.12) + _silence(0.23))
+
+    # falling whistle fading out over a breath of air: the airplane departs
+    _sw = []
+    _steps = (12, 14, 17, 21, 26, 33, 42, 54)
+    for _n, _p in enumerate(_steps):
+        _v = 0.55 * (1.0 - _n / len(_steps))
+        _sw += _tone(_p, 0.07, _v)
+    _air = _static(len(_sw) / _RATE, 0.18)
+    snd_swoosh = _sample([max(-32000, min(32000, a + b)) for a, b in zip(_sw, _air)])
+
+    audio_out = audiobusio.I2SOut(board.I2S_BCLK, board.I2S_WS, board.I2S_DIN)
+    print('Audio ready')
+except Exception as e:
+    print('Audio unavailable:', e)
+
+def sound_loop(sample):
+    if audio_out and sample:
+        audio_out.play(sample, loop=True)
+
+def sound_once(sample):
+    if audio_out and sample:
+        audio_out.play(sample)
+
+def sound_stop():
+    if audio_out:
+        audio_out.stop()
 
 secret_key = getenv('KEYWITNESS_SECRET_KEY')
 public_key = getenv('KEYWITNESS_PUBLIC_KEY')
@@ -181,6 +252,18 @@ def drain_keyboard():
     while supervisor.runtime.serial_bytes_available:
         sys.stdin.read(supervisor.runtime.serial_bytes_available)
 
+def keyboard_on():
+    """Power the external keyboard and wait for it to enumerate."""
+    if usb_host_power:
+        usb_host_power.value = True
+        sleep(2.0)
+    drain_keyboard()
+
+def keyboard_off():
+    if usb_host_power:
+        usb_host_power.value = False
+    drain_keyboard()
+
 def type_over_host(previous, message):
     """Backspace `previous` out of the host's text field, then type `message`."""
     for _ in range(len(previous)):
@@ -194,9 +277,10 @@ def start_recording():
     text = ''
     enabled = True
     led.value = True
-    # recording cue: double green flash on the NeoPixels. (Deliberately NOT
-    # extra sensor commands — bursting get_image desyncs the sensor's UART
-    # protocol, after which every poll times out and starves passthrough.)
+    keyboard_on()   # the keyboard lighting up is the record indicator
+    # green double-flash on the NeoPixels = keyboard enumerated, start typing.
+    # (Deliberately NOT extra sensor commands — bursting get_image desyncs
+    # the sensor's UART protocol and starves the main loop.)
     for _ in range(2):
         pixels.fill((0, 60, 0))
         pixels.show()
@@ -222,6 +306,7 @@ def attest_and_send(end_slot):
     global enabled, record, text, fp_start_slot, fp_start_time, last_fp_poll
     enabled = False
     led.value = False
+    keyboard_off()   # dark through encryption and upload
     if len(text) == 0:
         fp_start_slot = None
         fp_start_time = None
@@ -244,6 +329,7 @@ def attest_and_send(end_slot):
 
     # let the host see progress while the slow crypto runs; the newline
     # stays after the backspaces so the URL lands on its own line
+    sound_loop(snd_working)   # beep boop, DMA keeps it going through crypto
     layout.write('\nencrypting')
     typed = 'encrypting'
 
@@ -361,6 +447,7 @@ def attest_and_send(end_slot):
 
     drain_keyboard()  # anything typed while busy is discarded
     if result and 'url' in result:
+        sound_once(snd_swoosh)   # and away it goes
         # the fragment carries the decryption key to viewers
         # without it ever reaching the server
         share_url = (result['url'].replace('https://www.', 'https://')
@@ -370,6 +457,7 @@ def attest_and_send(end_slot):
         credit = ('typed by ' + name + ' ') if name else ''
         type_over_host(typed, credit + share_url)
     else:
+        sound_stop()
         type_over_host(typed, '[error]')
 
     pixels.fill((0, 0, 0))
@@ -382,6 +470,13 @@ def attest_and_send(end_slot):
     fp_start_time = None
 
 def connect_wifi():
+    sound_loop(snd_modem)
+    try:
+        _connect_wifi()
+    finally:
+        sound_stop()
+
+def _connect_wifi():
     while not esp.is_connected:
         # prefer networks the scan can actually see, fall back to trying all
         candidates = networks
@@ -420,10 +515,7 @@ print('Network time:', network_time())
 print()
 print('Ready!')
 print()
-if usb_host_power:
-    usb_host_power.value = True   # backlight on = actually ready
-    sleep(2.0)                    # let the keyboard enumerate
-drain_keyboard()   # discard anything typed before we were online
+# keyboard stays dark until a touch starts a recording
 
 last_fp_poll = 0
 last_key = 0
@@ -460,6 +552,7 @@ while True:
                 attest_and_send(None)
             except Exception as e:
                 print('Attest failed:', e)
+                sound_stop()
                 pixels.fill((0, 0, 0))
                 pixels.show()
         else:
@@ -495,6 +588,7 @@ while True:
                         attest_and_send(slot)
                     except Exception as e:
                         print('Attest failed:', e)
+                        sound_stop()
                         pixels.fill((0, 0, 0))
                         pixels.show()
                 else:
