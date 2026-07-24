@@ -111,7 +111,13 @@ try:
     _dac = adafruit_tlv320.TLV320DAC3100(board.I2C())
     _dac.configure_clocks(sample_rate=22050, bit_depth=16)
     _dac.speaker_output = True
-    _dac.speaker_volume = -16  # dB
+    _dac.headphone_output = True
+    _dac.dac_volume = 0        # silent without this — full-scale DAC level
+    _dac.speaker_mute = False  # and this — the speaker amp starts muted
+    _dac.headphone_left_mute = False
+    _dac.headphone_right_mute = False
+    _dac.speaker_volume = 0    # demo-floor loud; drop toward -16 if it distorts
+    _dac.headphone_volume = -10
 
     _RATE = 22050
     _TAU = 2 * math.pi
@@ -131,10 +137,23 @@ try:
     def _sample(data):
         return audiocore.RawSample(array.array('h', data), sample_rate=_RATE)
 
-    # dial-up handshake pastiche (loops)
-    snd_modem = _sample(
-        _tone(17, 0.25) + _tone(10, 0.2) + _static(0.2) +
-        _tone(22, 0.25) + _tone(10, 0.15) + _static(0.15))
+    def _mix(a, b):
+        return [max(-32000, min(32000, x + y)) for x, y in zip(a, b)]
+
+    # the real dial-up liturgy, in order (loops): dial tone (350+440Hz),
+    # three DTMF digits, the 2100Hz answer tone, V.21 warble, then the
+    # famous static crescendo
+    _dial = _mix(_tone(63, 0.35, 0.3), _tone(50, 0.35, 0.3))
+    _digits = []
+    for _lo, _hi in ((29, 18), (26, 16), (32, 15)):
+        _digits += _mix(_tone(_lo, 0.11, 0.3), _tone(_hi, 0.11, 0.3)) + _silence(0.06)
+    _answer = _silence(0.15) + _tone(10, 0.4, 0.45)
+    _warble = []
+    for _ in range(9):
+        _warble += _tone(22, 0.035, 0.45) + _tone(13, 0.035, 0.45)
+    snd_modem = _sample(_dial + _digits + _answer + _warble +
+                        _static(0.3, 0.28) + _tone(17, 0.1, 0.4) +
+                        _static(0.6, 0.4) + _silence(0.2))
 
     # beep ... boop ... (loops)
     snd_working = _sample(
@@ -470,14 +489,30 @@ def attest_and_send(end_slot):
     fp_start_time = None
 
 def connect_wifi():
+    # narrate over HID with an animated ellipsis, erased once we're online
+    banner = 'connecting to wifi'
     sound_loop(snd_modem)
+    layout.write(banner)
+    dots = 0
     try:
-        _connect_wifi()
+        dots = _connect_wifi()
     finally:
+        for _ in range(len(banner) + dots):
+            keyboard.send(Keycode.BACKSPACE)
         sound_stop()
 
+def _dot_tick(dots):
+    if dots < 3:
+        layout.write('.')
+        return dots + 1
+    for _ in range(3):
+        keyboard.send(Keycode.BACKSPACE)
+    return 0
+
 def _connect_wifi():
+    dots = 0
     while not esp.is_connected:
+        dots = _dot_tick(dots)
         # prefer networks the scan can actually see, fall back to trying all
         candidates = networks
         try:
@@ -493,13 +528,15 @@ def _connect_wifi():
         except Exception as e:
             print('Scan failed:', e)
         for s, p in candidates:
+            dots = _dot_tick(dots)
             try:
                 print('Trying', s, '...')
                 esp.connect_AP(s, p)
                 print('Connected to', s)
-                return
+                return dots
             except (OSError, RuntimeError) as e:
                 print('Failed:', e)
+    return dots
 
 print()
 if esp.status == adafruit_esp32spi.WL_IDLE_STATUS:
