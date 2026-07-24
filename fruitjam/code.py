@@ -360,23 +360,29 @@ def keyboard_attach(timeout_s=3.0):
     return False
 
 def keyboard_read():
-    """Newly pressed characters from the claimed keyboard ('' if none)."""
+    """Newly pressed characters from the claimed keyboard ('' if none).
+
+    Drains every queued report and processes each one's transitions — a fast
+    press-release-press of the same key (a double letter) spans multiple
+    reports, and collapsing them would eat the repeat."""
     global kbd_prev, kbd
     if not kbd:
         return ''
-    try:
-        kbd.read(kbd_ep, kbd_buf, timeout=5)
-    except usb.core.USBTimeoutError:
-        return ''
-    except Exception as e:
-        print('Keyboard read error:', e)
-        kbd = None
-        return ''
-    shift = bool(kbd_buf[0] & 0x22)
-    table = _KEYS_UPPER if shift else _KEYS_LOWER
-    keys = set(k & 0xFF for k in kbd_buf[2:8] if k)
-    out = ''.join(table.get(k, '') for k in keys - kbd_prev)
-    kbd_prev = keys
+    out = ''
+    for _ in range(6):
+        try:
+            kbd.read(kbd_ep, kbd_buf, timeout=5)
+        except usb.core.USBTimeoutError:
+            break
+        except Exception as e:
+            print('Keyboard read error:', e)
+            kbd = None
+            break
+        shift = bool(kbd_buf[0] & 0x22)
+        table = _KEYS_UPPER if shift else _KEYS_LOWER
+        keys = set(k & 0xFF for k in kbd_buf[2:8] if k)
+        out += ''.join(table.get(k, '') for k in keys - kbd_prev)
+        kbd_prev = keys
     return out
 
 def drain_keyboard():
@@ -515,6 +521,24 @@ def attest_and_send(end_slot):
     enc_key = urandom(32)
     nonce = urandom(12)
     inner = {'cleartext': text}
+    # keystroke timings, replayed from the record so backspaces pop and
+    # entries align 1:1 with the final text; ships encrypted, and the web
+    # verifier renders them as a typing timeline
+    timings = []
+    t_cum = 0
+    for entry in record.split('|'):
+        if not entry:
+            continue
+        code_s, delta_s = entry.split(',')
+        code_i = int(code_s)
+        t_cum += int(delta_s)
+        if code_i in (8, 127):
+            if timings:
+                timings.pop()
+        elif 32 <= code_i <= 127:
+            timings.append({'key': chr(code_i), 'downAt': t_cum, 'upAt': t_cum + 60})
+    if timings:
+        inner['keystrokeTimings'] = timings
     # start/end touch times ride inside the encrypted evidence — the signed
     # payload's field set is fixed by the server, but the inner JSON is ours
     if fp_start_time:
