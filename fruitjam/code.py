@@ -33,6 +33,12 @@ try:
 except ImportError:
     usb = None  # simulator / no USB host support
 
+# hang protection for network calls
+try:
+    import watchdog
+except ImportError:
+    watchdog = None
+
 # attestation
 import hashlib
 import ed25519
@@ -567,20 +573,49 @@ def attest_and_send(end_slot):
              '\n-----END KEYWITNESS ATTESTATION-----')
     data = json.dumps({'attestation': block})
 
-    # the ESP32 socket occasionally flakes on the first try — retry with
-    # backoff, reconnecting wifi if it dropped, before giving up
+    # the ESP32 socket can flake — or wedge so hard its own timeout never
+    # fires. A watchdog in RAISE mode preempts a hung attempt after ~8s
+    # (raising WatchDogTimeout inside the blocked call), and a full ESP32
+    # reset between attempts clears a wedged radio.
     result = None
     for attempt in range(3):
         if not esp.is_connected:
             print('Wifi dropped; reconnecting...')
             connect_wifi()
+        wd = None
+        if watchdog:
+            try:
+                wd = microcontroller.watchdog
+                wd.timeout = 8
+                wd.mode = watchdog.WatchDogMode.RAISE
+            except Exception as e:
+                wd = None
+                print('Watchdog unavailable:', e)
         try:
-            with requests.post(url, data=data, headers={'Content-Type': 'application/json'}, timeout=30) as response:
+            with requests.post(url, data=data, headers={'Content-Type': 'application/json'}, timeout=6) as response:
                 result = response.json()
-            break
         except Exception as e:
             print(f'Post attempt {attempt + 1} failed: {e}')
-            sleep(1 + attempt)
+        finally:
+            if wd:
+                try:
+                    wd.deinit()
+                except Exception:
+                    pass
+        if result is not None:
+            break
+        if attempt < 2:
+            print('Resetting wifi co-processor...')
+            try:
+                adafruit_connection_manager.connection_manager_close_all(pool)
+            except Exception as e:
+                print('Socket cleanup failed:', e)
+            try:
+                esp.reset()
+                sleep(1)
+            except Exception as e:
+                print('ESP reset failed:', e)
+            connect_wifi()
     print(result)
     print()
 
@@ -679,6 +714,14 @@ last_key = 0
 fp_touch_ready = True  # finger must lift between touch events
 
 while True:
+    # belt-and-braces: if the post-guard watchdog ever survives its deinit,
+    # keep it fed here so it can only ever fire inside a blocked network call
+    if watchdog:
+        try:
+            microcontroller.watchdog.feed()
+        except Exception:
+            pass
+
     # keystrokes come first so passthrough and the per-key pixel flashes
     # stay snappy; the sensor poll below blocks the loop for ~100ms
     chars = keyboard_read()
