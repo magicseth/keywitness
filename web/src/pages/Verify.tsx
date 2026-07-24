@@ -345,7 +345,9 @@ export default function Verify({ shortId, username, usernameSeq }: { shortId?: s
         : "invalid"
     : null;
 
-  const writerName = keyRecord ? keyRecord.name : knownKeyName;
+  // Prefer a locally-known key name, then the username the server attributed
+  // at upload time (verified signer key -> claimed username).
+  const writerName = keyRecord ? keyRecord.name : (knownKeyName || attestationDoc?.username);
   // SECURITY: gate the strong trust badges on SERVER-verified signals only.
   // `result.appAttestPresent` and `result.faceIdVerified` come straight from the
   // pasted VC and are self-assertable / replayable — a self-signed forgery sets

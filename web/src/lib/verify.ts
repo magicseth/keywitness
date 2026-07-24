@@ -461,6 +461,7 @@ async function verifyLegacy(
     valid,
     version: isV2 ? "v2" : "v1",
     cleartext,
+    cleartextHash: attestation.cleartextHash,
     deviceId: attestation.deviceId,
     faceIdVerified: attestation.faceIdVerified,
     timestamp: attestation.timestamp,

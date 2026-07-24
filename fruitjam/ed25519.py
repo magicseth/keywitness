@@ -30,7 +30,7 @@ disclose data to an attacker.  We rely on Python's long-integer
 arithmetic, so we cannot handle secrets without risking their disclosure.
 """
 
-import adafruit_hashlib as hashlib
+import sha512 as _sha512
 
 
 __version__ = "1.0.dev0"
@@ -42,7 +42,7 @@ l = 2**252 + 27742317777372353535851937790883648493
 
 
 def H(m):
-    return hashlib.sha512(m).digest()
+    return _sha512.digest(m)
 
 
 def pow2(x, p):
@@ -176,10 +176,7 @@ def scalarmult_B(e):
 
 
 def encodeint(y):
-    bits = [(y >> i) & 1 for i in range(b)]
-    return bytes(
-        [sum([bits[i * 8 + j] << j for j in range(8)]) for i in range(b // 8)]
-    )
+    return y.to_bytes(b // 8, 'little')
 
 
 def encodepoint(P):
@@ -187,14 +184,22 @@ def encodepoint(P):
     zi = inv(z)
     x = (x * zi) % q
     y = (y * zi) % q
-    bits = [(y >> i) & 1 for i in range(b - 1)] + [x & 1]
-    return bytes(
-        [sum([bits[i * 8 + j] << j for j in range(8)]) for i in range(b // 8)]
-    )
+    return (y | ((x & 1) << (b - 1))).to_bytes(b // 8, 'little')
 
 
 def bit(h, i):
     return (h[i // 8] >> (i % 8)) & 1
+
+
+def clamp(h):
+    """Secret scalar from the first 32 bytes of H(sk)."""
+    return (1 << (b - 2)) + (int.from_bytes(h[: b // 8], 'little') & ((1 << (b - 2)) - 8))
+
+
+def expand_secret(sk):
+    """Precompute (prefix, a) once per key for signature_cached."""
+    h = H(sk)
+    return h[b // 8 : b // 4], clamp(h)
 
 
 def publickey_unsafe(sk):
@@ -203,15 +208,12 @@ def publickey_unsafe(sk):
 
     See module docstring.  This function should be used for testing only.
     """
-    h = H(sk)
-    a = 2 ** (b - 2) + sum(2**i * bit(h, i) for i in range(3, b - 2))
-    A = scalarmult_B(a)
+    A = scalarmult_B(clamp(H(sk)))
     return encodepoint(A)
 
 
 def Hint(m):
-    h = H(m)
-    return sum(2**i * bit(h, i) for i in range(2 * b))
+    return int.from_bytes(H(m), 'little')
 
 
 def signature_unsafe(m, sk, pk):
@@ -220,9 +222,13 @@ def signature_unsafe(m, sk, pk):
 
     See module docstring.  This function should be used for testing only.
     """
-    h = H(sk)
-    a = 2 ** (b - 2) + sum(2**i * bit(h, i) for i in range(3, b - 2))
-    r = Hint(bytes([h[j] for j in range(b // 8, b // 4)]) + m)
+    prefix, a = expand_secret(sk)
+    return signature_cached(m, prefix, a, pk)
+
+
+def signature_cached(m, prefix, a, pk):
+    """Sign with (prefix, a) from expand_secret — skips rehashing the key."""
+    r = Hint(prefix + m)
     R = scalarmult_B(r)
     S = (r + Hint(encodepoint(R) + pk + m) * a) % l
     return encodepoint(R) + encodeint(S)
@@ -238,11 +244,11 @@ def isoncurve(P):
 
 
 def decodeint(s):
-    return sum(2**i * bit(s, i) for i in range(0, b))
+    return int.from_bytes(s, 'little')
 
 
 def decodepoint(s):
-    y = sum(2**i * bit(s, i) for i in range(0, b - 1))
+    y = int.from_bytes(s, 'little') & ((1 << (b - 1)) - 1)
     x = xrecover(y)
     if x & 1 != bit(s, b - 1):
         x = q - x
