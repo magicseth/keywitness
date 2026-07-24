@@ -43,6 +43,16 @@ led = digitalio.DigitalInOut(board.LED)
 led.direction = digitalio.Direction.OUTPUT
 led.value = True
 
+# Keep the external keyboard unpowered until we're online, so its backlight
+# honestly signals "ready" — no typing into the void during wifi connect.
+# (Boot-time only: it stays powered during attestations; input is drained.)
+usb_host_power = None
+try:
+    usb_host_power = digitalio.DigitalInOut(board.USB_HOST_5V_POWER)
+    usb_host_power.switch_to_output(value=False)
+except Exception as e:
+    print('USB host power control unavailable:', e)
+
 button1 = digitalio.DigitalInOut(board.BUTTON1)
 button1.switch_to_input(pull=digitalio.Pull.UP)
 button2 = digitalio.DigitalInOut(board.BUTTON2)
@@ -232,8 +242,9 @@ def attest_and_send(end_slot):
           '-> signing as', name if name else 'device key')
     print()
 
-    # let the host see progress while the slow crypto runs
-    layout.write('encrypting')
+    # let the host see progress while the slow crypto runs; the newline
+    # stays after the backspaces so the URL lands on its own line
+    layout.write('\nencrypting')
     typed = 'encrypting'
 
     # hash record
@@ -409,6 +420,9 @@ print('Network time:', network_time())
 print()
 print('Ready!')
 print()
+if usb_host_power:
+    usb_host_power.value = True   # backlight on = actually ready
+    sleep(2.0)                    # let the keyboard enumerate
 drain_keyboard()   # discard anything typed before we were online
 
 last_fp_poll = 0
