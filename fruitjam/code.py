@@ -376,14 +376,20 @@ def drain_keyboard():
             break
 
 def keyboard_on():
-    """Power the external keyboard, claim it, and narrate failure over HID."""
+    """Power the external keyboard and claim it, narrating the wait over HID:
+    the banner appears instantly at the touch and erases itself once the
+    keyboard is ready — then the green flash says type."""
+    banner = '[keyboard warming up]'
+    layout.write(banner)
     if usb_host_power:
         usb_host_power.value = True
         sleep(1.0)
     drain_keyboard()
-    if usb is not None and not keyboard_attach():
-        # console routing usually still delivers, a few seconds later
-        layout.write('[keyboard warming up] ')
+    if usb is not None:
+        keyboard_attach()  # direct claim, else console routing catches up
+    drain_keyboard()
+    for _ in range(len(banner)):
+        keyboard.send(Keycode.BACKSPACE)
 
 def keyboard_off():
     global kbd
