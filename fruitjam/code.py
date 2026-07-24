@@ -391,7 +391,7 @@ def keyboard_on():
     """Power the external keyboard and claim it, narrating the wait over HID:
     the banner appears instantly at the touch and erases itself once the
     keyboard is ready — then the green flash says type."""
-    banner = '[keyboard warming up]'
+    banner = '[booting secure keyboard...]'
     layout.write(banner)
     if usb_host_power:
         usb_host_power.value = True
